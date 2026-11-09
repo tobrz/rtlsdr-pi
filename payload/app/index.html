@@ -23,6 +23,7 @@ button.primary{background:var(--acc);border-color:var(--acc);color:#fff}
 button.stop{background:var(--bad);border-color:var(--bad);color:#fff}
 button:disabled{opacity:.4;cursor:not-allowed}
 button.mode.sel{background:var(--acc);border-color:var(--acc);color:#fff}
+button.win.sel{background:var(--acc);border-color:var(--acc);color:#fff}
 select,input{font:inherit;background:#0d1117;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
 label{font-size:13px;color:var(--mut);display:block;margin-bottom:4px}
 table{width:100%;border-collapse:collapse;font-size:13px}
@@ -80,12 +81,8 @@ a{color:var(--acc)}
     </div>
     <div class="note" id="controlNote"></div>
     <div id="owrxLink" class="hide" style="margin-top:10px">
-      <div class="note" style="margin-bottom:6px">Live waterfall + audio (OpenWebRX), tuned to 10m FT8 (28.074 USB). Click <b>▶</b> in the view to start audio, click the waterfall to retune. The <b>speaker icon</b> inside the view mutes audio but keeps the waterfall; the button below stops the whole live stream.</div>
-      <div class="row" style="margin-bottom:8px">
-        <button id="owrxMute" onclick="owrxToggle()">🔇 Mute / stop live audio</button>
-        <a class="button" id="owrxA" target="_blank" style="text-decoration:none">↗ Open full-screen</a>
-      </div>
-      <iframe id="owrxFrame" style="width:100%;height:640px;border:1px solid var(--line);border-radius:8px;background:#111" allow="autoplay"></iframe>
+      <div class="note" style="margin-bottom:8px">Live SDR running (OpenWebRX): blue/green waterfall + audio, tuned to 10m FT8. <b>Decoding &amp; logging are paused</b> while this is on — one dongle. Opens in a new tab; stop it (FT8 → Start) to resume logging.</div>
+      <a class="button" id="owrxA" target="_blank" style="text-decoration:none;display:inline-block">↗ Open live waterfall</a>
     </div>
     <div class="err" id="controlErr"></div>
   </div>
@@ -105,10 +102,19 @@ a{color:var(--acc)}
   </div>
 
   <div class="card">
-    <h2>Decode log (saved to disk — survives restarts)</h2>
-    <div class="row" style="margin-bottom:8px"><button onclick="loadHistory()">Refresh</button><span class="mut" id="histNote"></span></div>
-    <div style="overflow:auto;max-height:440px">
-      <table id="histTbl"><thead><tr><th>UTC</th><th>Mode</th><th>Band</th><th>SNR</th><th>Grid</th><th>Message</th></tr></thead><tbody></tbody></table>
+    <h2>Decode log — everything heard (database)</h2>
+    <div class="row" style="margin-bottom:8px">
+      <button class="win sel" data-win="600" onclick="setWin(600)">10 min</button>
+      <button class="win" data-win="1800" onclick="setWin(1800)">30 min</button>
+      <button class="win" data-win="3600" onclick="setWin(3600)">1 hr</button>
+      <button class="win" data-win="86400" onclick="setWin(86400)">24 hr</button>
+      <button class="win" data-win="604800" onclick="setWin(604800)">Week</button>
+      <button class="win" data-win="0" onclick="setWin(0)">All</button>
+      <button onclick="loadHistory()">↻</button>
+    </div>
+    <div class="mut" id="histNote" style="margin-bottom:8px"></div>
+    <div style="overflow:auto;max-height:460px">
+      <table id="histTbl"><thead><tr><th>Time</th><th>Mode</th><th>Band</th><th>SNR</th><th>Grid</th><th>Message</th></tr></thead><tbody></tbody></table>
     </div>
   </div>
 
@@ -232,13 +238,9 @@ function refresh(){
     document.getElementById("cCycles").textContent = sdr.cycles||0;
     document.getElementById("cAir").textContent = (sdr.mode==="adsb" && sdr.adsb) ? (sdr.adsb.with_position+"/"+sdr.adsb.count) : "—";
     document.getElementById("controlNote").textContent = sdr.last||"";
-    const ol=document.getElementById("owrxLink"), fr=document.getElementById("owrxFrame");
-    if(sdr.mode==="livesdr" && sdr.running){
-      const url="http://"+location.hostname+":8073";
-      document.getElementById("owrxA").href=url;
-      if(fr.dataset.loaded!=="1" && !OWRX_MUTED){ fr.src=url; fr.dataset.loaded="1"; }
-      ol.classList.remove("hide");
-    } else { ol.classList.add("hide"); if(fr.dataset.loaded==="1"){ fr.removeAttribute("src"); fr.dataset.loaded=""; } OWRX_MUTED=false; }
+    const ol=document.getElementById("owrxLink");
+    if(sdr.mode==="livesdr" && sdr.running){ document.getElementById("owrxA").href="http://"+location.hostname+":8073"; ol.classList.remove("hide"); }
+    else ol.classList.add("hide");
     // disable modes whose tools are missing
     document.querySelectorAll("button.mode").forEach(b=>{ b.disabled = !tools[b.dataset.mode]; });
     document.getElementById("startBtn").disabled = sdr.running;
@@ -276,15 +278,20 @@ function saveConfig(){
       document.getElementById("cfgNote").textContent="Saved. Takes effect next cycle (restart the mode for ADS-B).";})
     .catch(e=>document.getElementById("cfgNote").textContent=e.message);
 }
+let HIST_WIN=600;
+const WINLBL={600:"last 10 min",1800:"last 30 min",3600:"last hour",86400:"last 24 h",604800:"last week",0:"all time"};
+function setWin(w){ HIST_WIN=w; document.querySelectorAll("button.win").forEach(b=>b.classList.toggle("sel",+b.dataset.win===w)); loadHistory(); }
 function loadHistory(){
-  api("/api/history?limit=400").then(d=>{
+  api("/api/history?window="+HIST_WIN+"&limit=600").then(d=>{
     const rows=d.decodes||[], tb=document.querySelector("#histTbl tbody"); tb.innerHTML="";
     rows.forEach(r=>{
       const tr=document.createElement("tr");
-      tr.innerHTML=`<td>${r.when||""}</td><td>${r.mode||""}</td><td>${r.band||""}</td><td>${r.snr}</td><td>${r.grid||""}</td><td class="msg">${esc(r.message||"")}</td>`;
+      const t=r.ts?new Date(r.ts*1000).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit",second:"2-digit"}):(r.when||"");
+      tr.innerHTML=`<td>${t}</td><td>${r.mode||""}</td><td>${r.band||""}</td><td>${r.snr}</td><td>${r.grid||""}</td><td class="msg">${esc(r.message||"")}</td>`;
       tb.appendChild(tr);
     });
-    document.getElementById("histNote").textContent=rows.length?(rows.length+" saved decodes (newest first)."):"No saved decodes yet — they accumulate while FT8/WSPR runs.";
+    const shown=rows.length<(d.count||0)?" — newest "+rows.length+" shown":"";
+    document.getElementById("histNote").textContent=(d.count||0)+" decodes · "+(d.stations||0)+" unique stations ("+(WINLBL[HIST_WIN]||"")+")"+shown;
   }).catch(e=>document.getElementById("histNote").textContent=e.message);
 }
 
@@ -330,14 +337,6 @@ function changePw(){
   api("/api/password",{method:"POST",body:JSON.stringify({password:p})})
     .then(()=>{TOKEN=p;_store("rtlsdr-pw",p);_cookie(p);alert("Password changed.");})
     .catch(e=>alert(e.message));
-}
-
-// ---- live SDR mute (cross-origin iframe: stop the stream) ----
-let OWRX_MUTED=false;
-function owrxToggle(){
-  const fr=document.getElementById("owrxFrame"), b=document.getElementById("owrxMute");
-  if(!OWRX_MUTED){ fr.removeAttribute("src"); fr.dataset.loaded=""; OWRX_MUTED=true; b.textContent="🔊 Resume live view"; }
-  else { OWRX_MUTED=false; b.textContent="🔇 Mute / stop live audio"; fr.src="http://"+location.hostname+":8073"; fr.dataset.loaded="1"; }
 }
 
 // ---- map ----

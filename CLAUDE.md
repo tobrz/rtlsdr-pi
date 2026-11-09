@@ -32,6 +32,23 @@ Raspberry Pi OS is left as imaged; updates only touch `/opt/rtlsdr-pi` and the u
 - **Live SDR:** OpenWebRX in Docker (image `jketterl/openwebrx`, container `openwebrx`, port 8073). `sdr.Controller` mode `livesdr` runs `docker start/stop openwebrx`; exclusive with decoding (one dongle). Provisioned in bootstrap.sh (docker.io + image pull + `docker create` of a stopped container). SDR profiles are configured in OpenWebRX's own web Settings.
 - The DVB-T kernel module is blacklisted in `bootstrap.sh` so rtl-sdr can open the dongle.
 
+## Architecture decision (one dongle)
+
+**Our own decoder is the logging source, OpenWebRX is an on-demand waterfall view.**
+One RTL-SDR can physically do both at once only if a *single* app owns it and fans
+its output out (that's how the owner's Mac did it: gqrx drew the waterfall AND fed
+WSJT-X audio). OpenWebRX can work that way too, but its background-decoder was
+unstable on this Pi (SDR source restarting every ~30s). So:
+- **Our `rtl_fm`→jt9 decoder runs continuously**, logging every decode to a
+  **SQLite db** (`/var/lib/rtlsdr-pi/decodes.db`, table `decodes`, indexed on `ts`).
+  `/api/history?window=<sec>` serves time-filtered slices (10m/30m/1h/24h/week/all).
+  This is the source of truth for the log and (TODO) PSKReporter spotting.
+- **OpenWebRX = waterfall/audio only**, started on demand by `livesdr` mode
+  (`services_enabled`/`pskreporter_enabled` should be OFF there to stay stable).
+  It's linked, not embedded.
+- Because `rtl_fm` claims the dongle exclusively, decode-logging and the live
+  waterfall are **mutually exclusive** — `livesdr` mode stops the decoder.
+
 ## Gotchas
 
 - `jt9`/`wsprd` want a **12000 Hz mono** wav. FT8 cycle 15 s (capture ~13 s),

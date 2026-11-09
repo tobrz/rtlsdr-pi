@@ -15,7 +15,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import bands
 import decoders
-from sdr import Controller, load_config, save_config
+from sdr import Controller, load_config, save_config, db_query
 from update import REPO, UpdateError, apply_update, check_update, read_revision
 from wifi import AP_ADDRESS, bringup, load_networks, save_networks, scan_wifi, wifi_state
 
@@ -104,8 +104,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, {"decodes": SDR.recent(limit)})
         elif path == "/api/history":
             query = parse_qs(urlparse(self.path).query)
-            limit = _int((query.get("limit") or ["400"])[0], 400)
-            self._send(200, {"decodes": read_history(limit)})
+            window = _int((query.get("window") or ["0"])[0], 0)  # seconds back; 0 = all
+            limit = _int((query.get("limit") or ["600"])[0], 600)
+            self._send(200, db_query(window, limit))
         elif path == "/api/counts":
             self._send(200, SDR.counts())
         elif path == "/api/adsb":

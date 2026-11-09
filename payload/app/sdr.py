@@ -10,6 +10,7 @@ Decodes are kept in memory for the page and appended to a jsonl log on disk.
 import collections
 import json
 import os
+import sqlite3
 import subprocess
 import threading
 import time
@@ -20,6 +21,7 @@ import decoders
 DATA = os.environ.get("RTLSDR_DATA", "/var/lib/rtlsdr-pi")
 CONFIG_PATH = os.path.join(DATA, "config.json")
 LOG_PATH = os.path.join(DATA, "decodes.jsonl")
+DB_PATH = os.path.join(DATA, "decodes.db")
 ADSB_DIR = os.path.join(DATA, "adsb")
 WORK = os.path.join(DATA, "work")
 
@@ -52,10 +54,82 @@ def save_config(cfg):
     return merged
 
 
+def init_db():
+    os.makedirs(DATA, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS decodes("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, utc TEXT, mode TEXT, band TEXT, "
+        "snr INTEGER, dt REAL, freq_hz INTEGER, message TEXT, grid TEXT, caller TEXT)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_decodes_ts ON decodes(ts)")
+    conn.commit()
+    conn.close()
+
+
+def _insert(conn, row, ts):
+    callers = row.get("callers") or []
+    conn.execute(
+        "INSERT INTO decodes(ts,utc,mode,band,snr,dt,freq_hz,message,grid,caller) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?)",
+        (ts, row.get("when", ""), row.get("mode", ""), row.get("band", ""),
+         row.get("snr"), row.get("dt"), row.get("freq_hz"), row.get("message", ""),
+         row.get("grid", ""), callers[-1] if callers else ""))
+
+
+def migrate_jsonl():
+    """One-time import of a pre-database decodes.jsonl into the db."""
+    if not os.path.exists(LOG_PATH):
+        return
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        if conn.execute("SELECT COUNT(*) FROM decodes").fetchone()[0]:
+            return
+        with open(LOG_PATH) as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    _insert(conn, json.loads(line), time.time())
+                except (ValueError, sqlite3.Error):
+                    continue
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def db_query(window=0, limit=500):
+    """Decodes from the db; window seconds back (0 = all). Includes counts."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+    except sqlite3.Error:
+        return {"decodes": [], "count": 0, "stations": 0}
+    where, args = "", []
+    if window and window > 0:
+        where, args = "WHERE ts > ?", [time.time() - window]
+    try:
+        rows = conn.execute(
+            "SELECT utc,mode,band,snr,dt,freq_hz,message,grid,caller,ts FROM decodes "
+            + where + " ORDER BY ts DESC LIMIT ?", args + [limit]).fetchall()
+        count = conn.execute("SELECT COUNT(*) FROM decodes " + where, args).fetchone()[0]
+        join = " AND" if where else " WHERE"
+        stations = conn.execute(
+            "SELECT COUNT(DISTINCT caller) FROM decodes " + where + join + " caller<>''",
+            args).fetchone()[0]
+    except sqlite3.Error:
+        conn.close()
+        return {"decodes": [], "count": 0, "stations": 0}
+    conn.close()
+    cols = ["when", "mode", "band", "snr", "dt", "freq_hz", "message", "grid", "caller", "ts"]
+    return {"decodes": [dict(zip(cols, r)) for r in rows], "count": count, "stations": stations}
+
+
 class Controller:
     def __init__(self):
         os.makedirs(WORK, exist_ok=True)
         os.makedirs(ADSB_DIR, exist_ok=True)
+        init_db()
+        migrate_jsonl()
         self._lock = threading.Lock()
         self._mode = "idle"            # idle | ft8 | wspr | adsb
         self._band = ""
@@ -201,6 +275,20 @@ class Controller:
                 for call in row.get("callers", []):
                     self._calls.add(call)
         self._append_log(rows)
+        self._log_db(rows)
+
+    def _log_db(self, rows):
+        if not rows:
+            return
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            now = time.time()
+            for row in rows:
+                _insert(conn, row, now)
+            conn.commit()
+            conn.close()
+        except sqlite3.Error:
+            pass
 
     def _append_log(self, rows):
         if not rows:
