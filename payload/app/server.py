@@ -102,6 +102,10 @@ class Handler(BaseHTTPRequestHandler):
             query = parse_qs(urlparse(self.path).query)
             limit = _int((query.get("limit") or ["200"])[0], 200)
             self._send(200, {"decodes": SDR.recent(limit)})
+        elif path == "/api/history":
+            query = parse_qs(urlparse(self.path).query)
+            limit = _int((query.get("limit") or ["400"])[0], 400)
+            self._send(200, {"decodes": read_history(limit)})
         elif path == "/api/counts":
             self._send(200, SDR.counts())
         elif path == "/api/adsb":
@@ -250,6 +254,27 @@ def password_from_cookie(header):
         if sep and name == "rtlsdr-password":
             return unquote(value)
     return ""
+
+
+def read_history(limit=400):
+    """Decodes persisted to disk (survives restarts and mode switches), newest first."""
+    path = os.path.join(DATA, "decodes.jsonl")
+    try:
+        with open(path) as handle:
+            lines = handle.readlines()
+    except OSError:
+        return []
+    out = []
+    for line in lines[-limit:]:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            out.append(json.loads(line))
+        except ValueError:
+            continue
+    out.reverse()
+    return out
 
 
 def _int(value, default):
