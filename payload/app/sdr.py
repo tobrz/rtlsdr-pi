@@ -94,6 +94,9 @@ class Controller:
             self._since = time.time()
             self._last = "starting"
             self._stop.clear()
+        # Start the backend OUTSIDE the lock — docker/subprocess calls can be
+        # slow, and holding the lock would block status() and every other request.
+        try:
             if mode == "adsb":
                 self._start_adsb()
             elif mode == "livesdr":
@@ -101,6 +104,11 @@ class Controller:
             else:
                 self._thread = threading.Thread(target=self._loop, args=(mode, band), daemon=True)
                 self._thread.start()
+        except Exception:
+            with self._lock:
+                self._mode = "idle"
+                self._last = "failed to start"
+            raise
         return self.status()
 
     def stop(self):
@@ -241,9 +249,11 @@ class Controller:
     # ---- Live SDR (OpenWebRX in Docker — waterfall + audio in the browser) ----
 
     def _start_livesdr(self):
-        r = subprocess.run(["docker", "start", "openwebrx"], capture_output=True, text=True)
+        try:
+            r = subprocess.run(["docker", "start", "openwebrx"], capture_output=True, text=True, timeout=30)
+        except subprocess.TimeoutExpired:
+            raise ValueError("Docker did not respond starting OpenWebRX (daemon busy?).")
         if r.returncode != 0:
-            self._mode = "idle"
             raise ValueError("Could not start OpenWebRX: " + (r.stderr.strip() or "container missing — run setup"))
         self._note("OpenWebRX live SDR running on port 8073")
 
