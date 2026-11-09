@@ -29,7 +29,7 @@ FT8_CAPTURE = 13          # seconds of audio per 15 s cycle
 WSPR_CAPTURE = 114        # seconds of audio per 120 s cycle
 MARGIN = 0.8              # start capture just after the boundary
 
-DEFAULTS = {"gain": 40.0, "ppm": 0, "adsb_gain": "", "flightaware": False}
+DEFAULTS = {"gain": 40.0, "ppm": 0, "adsb_gain": "", "flightaware": False, "mygrid": "EN53hb"}
 
 
 def load_config():

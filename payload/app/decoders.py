@@ -82,6 +82,7 @@ def decode_ft8(wav_path, dial_mhz, when=""):
             "freq_hz": int(round(float(dial_mhz) * 1e6)) + int(audio_hz),
             "message": message.strip(),
             "callers": extract_calls(message),
+            "grid": extract_grid(message),
             "when": when,
         })
     return rows
@@ -105,6 +106,7 @@ def decode_wspr(wav_path, dial_mhz, when=""):
             "drift": int(drift),
             "message": message.strip(),
             "callers": extract_calls(message),
+            "grid": extract_grid(message),
             "when": when,
         })
     return rows
@@ -112,6 +114,7 @@ def decode_wspr(wav_path, dial_mhz, when=""):
 
 CALL_RE = re.compile(r"\b([A-Z0-9]{1,3}[0-9][A-Z0-9]*[A-Z](?:/[A-Z0-9]+)?)\b")
 NOT_CALLS = {"CQ", "DX", "RR73", "RRR", "73", "QRZ", "TU"}
+GRID_RE = re.compile(r"[A-R]{2}[0-9]{2}([A-X]{2})?$")
 
 
 def extract_calls(message):
@@ -123,6 +126,16 @@ def extract_calls(message):
         if m and tok not in out:
             out.append(tok)
     return out
+
+
+def extract_grid(message):
+    """The last Maidenhead grid token (the sender's grid), or '' — not RR73."""
+    for tok in reversed(message.upper().split()):
+        if tok == "RR73":
+            continue
+        if GRID_RE.fullmatch(tok):
+            return tok
+    return ""
 
 
 # ---- ADS-B (read-only; dump1090-fa runs as its own process) ----

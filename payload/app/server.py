@@ -180,6 +180,8 @@ class Handler(BaseHTTPRequestHandler):
             out["ppm"] = _int(body.get("ppm"), 0)
         if "adsb_gain" in body:
             out["adsb_gain"] = str(body.get("adsb_gain") or "")
+        if "mygrid" in body:
+            out["mygrid"] = str(body.get("mygrid") or "").strip()
         if "flightaware" in body:
             out["flightaware"] = bool(body.get("flightaware"))
         return out

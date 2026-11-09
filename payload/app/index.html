@@ -41,6 +41,8 @@ td.msg{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;white-space:norma
 pre{white-space:pre-wrap;font-size:12px;color:var(--mut);max-height:220px;overflow:auto}
 a{color:var(--acc)}
 </style>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 </head>
 <body>
 <div id="login">
@@ -94,11 +96,18 @@ a{color:var(--acc)}
   </div>
 
   <div class="card">
+    <h2>Map — who you're hearing</h2>
+    <div id="map" style="height:380px;border-radius:8px;overflow:hidden;background:#0d1117"></div>
+    <div class="note" id="mapNote">Stations appear here as their grid square comes through (not every decode carries one).</div>
+  </div>
+
+  <div class="card">
     <h2>Radio settings</h2>
     <div class="row">
       <div><label for="gain">RF gain (dB)</label><input id="gain" type="number" step="0.1" style="width:110px"></div>
       <div><label for="ppm">Freq. correction (ppm)</label><input id="ppm" type="number" step="1" style="width:110px"></div>
       <div><label for="adsbGain">ADS-B gain (blank=auto)</label><input id="adsbGain" type="text" style="width:130px"></div>
+      <div><label for="mygrid">Your grid (QTH)</label><input id="mygrid" type="text" style="width:110px" placeholder="EN53hb"></div>
       <div style="align-self:flex-end"><button onclick="saveConfig()">Save</button></div>
     </div>
     <div class="note" id="cfgNote"></div>
@@ -236,15 +245,20 @@ function loadDecodes(){
 function saveConfig(){
   const body = {gain:parseFloat(document.getElementById("gain").value),
                 ppm:parseInt(document.getElementById("ppm").value||"0",10),
-                adsb_gain:document.getElementById("adsbGain").value};
+                adsb_gain:document.getElementById("adsbGain").value,
+                mygrid:document.getElementById("mygrid").value.trim()};
   api("/api/config",{method:"POST",body:JSON.stringify(body)})
-    .then(d=>{document.getElementById("cfgNote").textContent="Saved. Takes effect next cycle (restart the mode for ADS-B).";})
+    .then(d=>{if(body.mygrid){MYGRID=body.mygrid; if(MAP){MAP.setView(gridToLatLon(MYGRID)||[43,-89]);} renderMap();}
+      document.getElementById("cfgNote").textContent="Saved. Takes effect next cycle (restart the mode for ADS-B).";})
     .catch(e=>document.getElementById("cfgNote").textContent=e.message);
 }
 function loadConfig(){
   api("/api/config").then(d=>{const c=d.config||{};
     document.getElementById("gain").value=c.gain; document.getElementById("ppm").value=c.ppm;
-    document.getElementById("adsbGain").value=c.adsb_gain||"";}).catch(()=>{});
+    document.getElementById("adsbGain").value=c.adsb_gain||"";
+    document.getElementById("mygrid").value=c.mygrid||"";
+    if(c.mygrid) MYGRID=c.mygrid;
+    initMap(); renderMap();}).catch(()=>{});
 }
 
 function scanWifi(){
@@ -282,6 +296,48 @@ function changePw(){
     .catch(e=>alert(e.message));
 }
 
+// ---- map ----
+let MAP=null, MAPLAYER=null, MYGRID="EN53hb";
+function gridToLatLon(g){
+  g=(g||"").toUpperCase();
+  if(g.length<4 || g.charCodeAt(0)<65 || g.charCodeAt(0)>82) return null;
+  const A=65;
+  let lon=(g.charCodeAt(0)-A)*20-180, lat=(g.charCodeAt(1)-A)*10-90;
+  lon+=parseInt(g[2])*2; lat+=parseInt(g[3]);
+  if(g.length>=6){ lon+=(g.charCodeAt(4)-A)*(5/60)+2.5/60; lat+=(g.charCodeAt(5)-A)*(2.5/60)+1.25/60; }
+  else { lon+=1; lat+=0.5; }
+  if(isNaN(lat)||isNaN(lon)) return null;
+  return [lat,lon];
+}
+function initMap(){
+  if(MAP || !window.L || !document.getElementById("map")) return;
+  const home=gridToLatLon(MYGRID)||[43,-89];
+  MAP=L.map('map',{attributionControl:false,worldCopyJump:true,minZoom:1}).setView(home,3);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',{maxZoom:8}).addTo(MAP);
+  MAPLAYER=L.layerGroup().addTo(MAP);
+  setTimeout(()=>MAP.invalidateSize(),200);
+}
+function renderMap(){
+  if(!MAP){ initMap(); if(!MAP) return; }
+  api("/api/decodes?limit=400").then(d=>{
+    MAPLAYER.clearLayers();
+    const home=gridToLatLon(MYGRID)||[43,-89];
+    L.circleMarker(home,{radius:6,color:'#2f81f7',fillColor:'#2f81f7',fillOpacity:1,weight:2}).addTo(MAPLAYER).bindTooltip("You — "+MYGRID,{permanent:false});
+    const seen={};
+    (d.decodes||[]).forEach(r=>{
+      const g=r.grid; if(!g) return;
+      const call=(r.callers&&r.callers[r.callers.length-1])||"";
+      const key=g+"|"+call; if(seen[key]) return; seen[key]=1;
+      const ll=gridToLatLon(g); if(!ll) return;
+      L.polyline([home,ll],{color:'#2f81f7',weight:1,opacity:.3}).addTo(MAPLAYER);
+      L.circleMarker(ll,{radius:4,color:'#3fb950',fillColor:'#3fb950',fillOpacity:.9,weight:1}).addTo(MAPLAYER)
+        .bindTooltip((call||"?")+"  "+g+"  "+r.snr+"dB");
+    });
+    const n=Object.keys(seen).length;
+    document.getElementById("mapNote").textContent = n? (n+" stations plotted (from "+(d.decodes||[]).length+" recent decodes). Blue = you ("+MYGRID+").") : "No grids yet — stations show up here once one sends its grid square.";
+  }).catch(()=>{});
+}
+
 function setPill(id, good, text, neutral){
   const el=document.getElementById(id); el.textContent=text;
   el.classList.remove("on","off"); if(neutral) return;
@@ -294,6 +350,7 @@ function boot(){
   loadConfig(); refresh();
   clearInterval(window._t1); clearInterval(window._t2);
   window._t1=setInterval(refresh,2500);
+  window._t2=setInterval(renderMap,20000);
 }
 // Enter key submits the login form
 document.getElementById("pw").addEventListener("keydown",e=>{if(e.key==="Enter")login();});
