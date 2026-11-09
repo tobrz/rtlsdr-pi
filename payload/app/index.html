@@ -79,7 +79,11 @@ a{color:var(--acc)}
       <button class="stop" id="stopBtn" onclick="stop()">Stop</button></div>
     </div>
     <div class="note" id="controlNote"></div>
-    <div id="owrxLink" class="hide" style="margin-top:10px"><a class="button" id="owrxA" target="_blank" style="text-decoration:none;display:inline-block">↗ Open OpenWebRX — live waterfall + audio</a></div>
+    <div id="owrxLink" class="hide" style="margin-top:10px">
+      <div class="note" style="margin-bottom:6px">Live waterfall + audio (OpenWebRX). Click <b>▶</b> inside the view to start audio. Tuned to 10m FT8 (28.074 USB) — click the waterfall to retune.</div>
+      <a class="button" id="owrxA" target="_blank" style="text-decoration:none;display:inline-block;margin-bottom:8px">↗ Open full-screen</a>
+      <iframe id="owrxFrame" style="width:100%;height:640px;border:1px solid var(--line);border-radius:8px;background:#111" allow="autoplay"></iframe>
+    </div>
     <div class="err" id="controlErr"></div>
   </div>
 
@@ -217,9 +221,13 @@ function refresh(){
     document.getElementById("cCycles").textContent = sdr.cycles||0;
     document.getElementById("cAir").textContent = (sdr.mode==="adsb" && sdr.adsb) ? (sdr.adsb.with_position+"/"+sdr.adsb.count) : "—";
     document.getElementById("controlNote").textContent = sdr.last||"";
-    const ol=document.getElementById("owrxLink");
-    if(sdr.mode==="livesdr" && sdr.running){ document.getElementById("owrxA").href="http://"+location.hostname+":8073"; ol.classList.remove("hide"); }
-    else ol.classList.add("hide");
+    const ol=document.getElementById("owrxLink"), fr=document.getElementById("owrxFrame");
+    if(sdr.mode==="livesdr" && sdr.running){
+      const url="http://"+location.hostname+":8073";
+      document.getElementById("owrxA").href=url;
+      if(fr.dataset.loaded!=="1"){ fr.src=url; fr.dataset.loaded="1"; }
+      ol.classList.remove("hide");
+    } else { ol.classList.add("hide"); if(fr.dataset.loaded==="1"){ fr.removeAttribute("src"); fr.dataset.loaded=""; } }
     // disable modes whose tools are missing
     document.querySelectorAll("button.mode").forEach(b=>{ b.disabled = !tools[b.dataset.mode]; });
     document.getElementById("startBtn").disabled = sdr.running;
