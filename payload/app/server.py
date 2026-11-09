@@ -39,7 +39,10 @@ def password():
 
 
 class Handler(BaseHTTPRequestHandler):
-    protocol_version = "HTTP/1.1"
+    # HTTP/1.0 + close-per-request: ThreadingHTTPServer with HTTP/1.1 keep-alive
+    # can stall a browser's reused connection (curl, which opens a fresh socket
+    # each time, never sees it). One user, low traffic — close each connection.
+    protocol_version = "HTTP/1.0"
 
     def log_message(self, fmt, *args):
         return
@@ -60,8 +63,14 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(payload)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "close")
+        self.close_connection = True
         self.end_headers()
         self.wfile.write(payload)
+        try:
+            self.wfile.flush()
+        except Exception:
+            pass
 
     def _authorized(self):
         secret = password()

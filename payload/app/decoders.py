@@ -44,12 +44,14 @@ def capture_wav(dial_mhz, seconds, out_path, gain=40, ppm=0, rate=12000):
     gain = float(gain)
     ppm = int(ppm)
     tmp = out_path + ".part"
+    # sox infers the output format from the file extension; ".part" is not an
+    # audio type, so force WAV out explicitly or sox fails with "no handler".
     cmd = (
         f"timeout {secs} rtl_fm -f {freq_hz} -M usb -s {rate} -g {gain} -p {ppm} - 2>/dev/null "
-        f"| sox -t raw -r {rate} -e signed -b 16 -c 1 - {tmp} 2>/dev/null"
+        f"| sox -t raw -r {rate} -e signed -b 16 -c 1 - -t wav {tmp} 2>/dev/null"
     )
     try:
-        subprocess.run(["bash", "-lc", cmd], timeout=secs + 15, check=False)
+        subprocess.run(["bash", "-c", cmd], timeout=secs + 15, check=False)
     except subprocess.TimeoutExpired:
         return False, "capture timed out"
     if not os.path.isfile(tmp) or os.path.getsize(tmp) < 1000:

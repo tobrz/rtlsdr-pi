@@ -153,6 +153,7 @@ function hideLogin(){ document.getElementById("login").classList.add("hide"); do
 
 function login(){
   const pw = document.getElementById("pw").value;
+  document.getElementById("loginErr").textContent = "Signing in…";
   fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:pw})})
     .then(r=>r.json().then(d=>({ok:r.ok,d})))
     .then(({ok,d})=>{
