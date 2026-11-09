@@ -131,7 +131,10 @@ a{color:var(--acc)}
 </main>
 
 <script>
-let TOKEN = sessionStorage.getItem("rtlsdr-pw") || "";
+function _store(k,v){try{sessionStorage.setItem(k,v);}catch(e){}}
+function _recall(k){try{return sessionStorage.getItem(k)||"";}catch(e){return "";}}
+function _cookie(v){try{document.cookie="rtlsdr-password="+encodeURIComponent(v)+";path=/;max-age=31536000";}catch(e){}}
+let TOKEN = _recall("rtlsdr-pw");
 let MODE = "ft8", BANDS = [], STATUS = {};
 
 function api(path, opts){
@@ -154,10 +157,10 @@ function login(){
     .then(r=>r.json().then(d=>({ok:r.ok,d})))
     .then(({ok,d})=>{
       if(!ok){ document.getElementById("loginErr").textContent = d.error||"Wrong password."; return; }
-      TOKEN = pw; sessionStorage.setItem("rtlsdr-pw", pw);
-      document.cookie = "rtlsdr-password="+encodeURIComponent(pw)+";path=/;max-age=31536000";
+      TOKEN = pw; _store("rtlsdr-pw", pw); _cookie(pw);
       hideLogin(); boot();
-    });
+    })
+    .catch(e=>{ document.getElementById("loginErr").textContent = "Could not reach the Pi: "+(e&&e.message||e); });
 }
 
 function pickMode(m){
@@ -274,7 +277,7 @@ function doUpdate(){
 function changePw(){
   const p=prompt("New password (at least 8 characters):"); if(!p) return;
   api("/api/password",{method:"POST",body:JSON.stringify({password:p})})
-    .then(()=>{TOKEN=p;sessionStorage.setItem("rtlsdr-pw",p);document.cookie="rtlsdr-password="+encodeURIComponent(p)+";path=/;max-age=31536000";alert("Password changed.");})
+    .then(()=>{TOKEN=p;_store("rtlsdr-pw",p);_cookie(p);alert("Password changed.");})
     .catch(e=>alert(e.message));
 }
 
@@ -291,6 +294,8 @@ function boot(){
   clearInterval(window._t1); clearInterval(window._t2);
   window._t1=setInterval(refresh,2500);
 }
+// Enter key submits the login form
+document.getElementById("pw").addEventListener("keydown",e=>{if(e.key==="Enter")login();});
 // first load
 fetch("/api/login-info").then(r=>r.json()).then(info=>{
   if(info.factory) document.getElementById("loginNote").textContent="Factory password: rtlsdr-pi (change it under Maintenance).";
