@@ -73,17 +73,20 @@ class Controller:
 
     def start(self, mode, band=""):
         mode = (mode or "").lower()
-        if mode not in ("ft8", "wspr", "adsb"):
-            raise ValueError("Pick FT8, WSPR, or ADS-B.")
+        if mode not in ("ft8", "wspr", "adsb", "livesdr"):
+            raise ValueError("Pick FT8, WSPR, ADS-B, or Live SDR.")
         if mode in ("ft8", "wspr"):
             if not bands.is_valid(band, mode):
                 raise ValueError("Unknown band for that mode.")
             tools = decoders.tool_status()
             if not tools.get(mode):
                 raise ValueError(f"{mode.upper()} tools are not installed yet. Let first-boot setup finish.")
-        else:
+        elif mode == "adsb":
             if not decoders.tool_status().get("adsb"):
                 raise ValueError("dump1090-fa is not installed. Run setup, or install it for ADS-B.")
+        elif mode == "livesdr":
+            if not decoders.tool_status().get("livesdr"):
+                raise ValueError("OpenWebRX/Docker is not installed yet. Let first-boot setup finish.")
         self.stop()
         with self._lock:
             self._mode = mode
@@ -93,18 +96,23 @@ class Controller:
             self._stop.clear()
             if mode == "adsb":
                 self._start_adsb()
+            elif mode == "livesdr":
+                self._start_livesdr()
             else:
                 self._thread = threading.Thread(target=self._loop, args=(mode, band), daemon=True)
                 self._thread.start()
         return self.status()
 
     def stop(self):
+        was = self._mode
         self._stop.set()
         thread = self._thread
         if thread and thread.is_alive():
             thread.join(timeout=FT8_CAPTURE + 20)
         self._thread = None
         self._stop_adsb()
+        if was == "livesdr":
+            self._stop_livesdr()
         with self._lock:
             self._mode = "idle"
             self._band = ""
@@ -229,6 +237,18 @@ class Controller:
                 proc.wait(timeout=8)
             except subprocess.TimeoutExpired:
                 proc.kill()
+
+    # ---- Live SDR (OpenWebRX in Docker — waterfall + audio in the browser) ----
+
+    def _start_livesdr(self):
+        r = subprocess.run(["docker", "start", "openwebrx"], capture_output=True, text=True)
+        if r.returncode != 0:
+            self._mode = "idle"
+            raise ValueError("Could not start OpenWebRX: " + (r.stderr.strip() or "container missing — run setup"))
+        self._note("OpenWebRX live SDR running on port 8073")
+
+    def _stop_livesdr(self):
+        subprocess.run(["docker", "stop", "openwebrx"], capture_output=True, text=True, timeout=30)
 
     def _adsb_snapshot(self):
         path = os.path.join(ADSB_DIR, "aircraft.json")

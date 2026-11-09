@@ -24,11 +24,12 @@ WSPR_LINE = re.compile(
 def tool_status():
     """Which external programs are present. Drives what the page offers."""
     have = {name: shutil.which(name) is not None for name in (
-        "rtl_fm", "rtl_sdr", "rtl_test", "sox", "jt9", "wsprd", "dump1090-fa", "piaware",
+        "rtl_fm", "rtl_sdr", "rtl_test", "sox", "jt9", "wsprd", "dump1090-fa", "piaware", "docker",
     )}
     have["ft8"] = have["rtl_fm"] and have["sox"] and have["jt9"]
     have["wspr"] = have["rtl_fm"] and have["sox"] and have["wsprd"]
     have["adsb"] = have["dump1090-fa"]
+    have["livesdr"] = have["docker"]  # OpenWebRX runs as a Docker container
     return have
 
 

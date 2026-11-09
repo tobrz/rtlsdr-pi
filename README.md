@@ -1,7 +1,8 @@
 # RTL-SDR on a Raspberry Pi
 
 Headless SDR appliance for an RTL-SDR dongle on a Raspberry Pi 4. Decodes
-**FT8** and **WSPR** on a band you pick, or runs **ADS-B** (FlightAware). The Pi
+**FT8** and **WSPR** on a band you pick, runs **ADS-B** (FlightAware), or opens a
+**Live SDR** view — an OpenWebRX waterfall + audio right in your browser. The Pi
 joins a known Wi-Fi network when one is in range; otherwise it becomes the access
 point `RTLSDR` at `192.168.50.1` and hands your phone or laptop an address.
 Setup and every later change happen on a web page — no keyboard, mouse, or HDMI
@@ -21,6 +22,17 @@ console runs **exactly one** activity — starting FT8, WSPR, or ADS-B stops
 whatever was running. ADS-B (1090 MHz) also needs its own small antenna; your
 HF antenna won't hear aircraft. A second dongle + 1090 antenna would let ADS-B
 run alongside the HF modes, but that is not this build.
+
+## Live SDR (OpenWebRX)
+
+The **Live SDR** mode runs **OpenWebRX** in Docker (`jketterl/openwebrx`), giving a
+browser waterfall, click-to-tune, every demod mode, and **audio streaming** at
+`http://<pi>:8073`. First-boot installs Docker, pulls the image, and `docker
+create`s an `openwebrx` container (stopped). Starting **Live SDR** in the console
+stops decoding and `docker start`s it; stopping it hands the dongle back. It's a
+separate UI (opens in a new tab) — the console just manages the dongle hand-off.
+First use: open OpenWebRX **Settings** (admin login), add the RTL-SDR device and a
+10m profile. The Google Maps API key it asks for is optional (map plotting only).
 
 ## Band reach
 

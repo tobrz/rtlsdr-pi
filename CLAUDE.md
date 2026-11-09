@@ -29,6 +29,7 @@ Raspberry Pi OS is left as imaged; updates only touch `/opt/rtlsdr-pi` and the u
 - **Decoders:** FT8/WSPR = `rtl_fm | sox` → wav → `jt9 -8` / `wsprd`
   (from the `wsjtx` apt package). ADS-B = `dump1090-fa` (FlightAware repo,
   best-effort install), read via `adsb/aircraft.json`.
+- **Live SDR:** OpenWebRX in Docker (image `jketterl/openwebrx`, container `openwebrx`, port 8073). `sdr.Controller` mode `livesdr` runs `docker start/stop openwebrx`; exclusive with decoding (one dongle). Provisioned in bootstrap.sh (docker.io + image pull + `docker create` of a stopped container). SDR profiles are configured in OpenWebRX's own web Settings.
 - The DVB-T kernel module is blacklisted in `bootstrap.sh` so rtl-sdr can open the dongle.
 
 ## Gotchas

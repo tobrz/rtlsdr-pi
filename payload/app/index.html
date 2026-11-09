@@ -71,6 +71,7 @@ a{color:var(--acc)}
       <button class="mode" data-mode="ft8" onclick="pickMode('ft8')">FT8</button>
       <button class="mode" data-mode="wspr" onclick="pickMode('wspr')">WSPR</button>
       <button class="mode" data-mode="adsb" onclick="pickMode('adsb')">ADS-B (1090)</button>
+      <button class="mode" data-mode="livesdr" onclick="pickMode('livesdr')">Live SDR</button>
     </div>
     <div class="row" id="bandRow">
       <div><label for="band">Band</label><select id="band"></select></div>
@@ -78,6 +79,7 @@ a{color:var(--acc)}
       <button class="stop" id="stopBtn" onclick="stop()">Stop</button></div>
     </div>
     <div class="note" id="controlNote"></div>
+    <div id="owrxLink" class="hide" style="margin-top:10px"><a class="button" id="owrxA" target="_blank" style="text-decoration:none;display:inline-block">↗ Open OpenWebRX — live waterfall + audio</a></div>
     <div class="err" id="controlErr"></div>
   </div>
 
@@ -176,7 +178,7 @@ function login(){
 function pickMode(m){
   MODE = m;
   document.querySelectorAll("button.mode").forEach(b=>b.classList.toggle("sel", b.dataset.mode===m));
-  document.getElementById("bandRow").style.display = (m==="adsb") ? "none" : "flex";
+  document.getElementById("bandRow").style.display = (m==="adsb"||m==="livesdr") ? "none" : "flex";
   fillBands();
 }
 function fillBands(){
@@ -215,6 +217,9 @@ function refresh(){
     document.getElementById("cCycles").textContent = sdr.cycles||0;
     document.getElementById("cAir").textContent = (sdr.mode==="adsb" && sdr.adsb) ? (sdr.adsb.with_position+"/"+sdr.adsb.count) : "—";
     document.getElementById("controlNote").textContent = sdr.last||"";
+    const ol=document.getElementById("owrxLink");
+    if(sdr.mode==="livesdr" && sdr.running){ document.getElementById("owrxA").href="http://"+location.hostname+":8073"; ol.classList.remove("hide"); }
+    else ol.classList.add("hide");
     // disable modes whose tools are missing
     document.querySelectorAll("button.mode").forEach(b=>{ b.disabled = !tools[b.dataset.mode]; });
     document.getElementById("startBtn").disabled = sdr.running;

@@ -47,6 +47,22 @@ if ! have dump1090-fa && ip route | grep -q '^default'; then
   rm -rf "$TMP"
 fi
 
+# Live SDR: OpenWebRX in Docker (browser waterfall + audio). Best-effort; the
+# console starts/stops the container on demand (one dongle, so it's exclusive).
+if ! have docker && ip route | grep -q '^default'; then
+  echo "installing docker for OpenWebRX"
+  DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io && systemctl enable --now docker || echo "docker install skipped"
+fi
+if have docker && ip route | grep -q '^default' && ! docker image inspect jketterl/openwebrx:latest >/dev/null 2>&1; then
+  echo "pulling openwebrx image"
+  docker pull jketterl/openwebrx:latest || echo "openwebrx pull skipped"
+fi
+if have docker && docker image inspect jketterl/openwebrx:latest >/dev/null 2>&1 && ! docker inspect openwebrx >/dev/null 2>&1; then
+  docker create --name openwebrx --restart no -p 8073:8073 --device /dev/bus/usb \
+    -v owrx-settings:/var/lib/openwebrx -v owrx-cfg:/etc/openwebrx jketterl/openwebrx:latest \
+    && echo "openwebrx container created" || echo "openwebrx create skipped"
+fi
+
 if ! have jt9 || ! have rtl_fm; then
   echo "core SDR tools still missing"
   exit 1
