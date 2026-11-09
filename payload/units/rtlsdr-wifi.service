@@ -1,0 +1,14 @@
+[Unit]
+Description=RTL-SDR Wi-Fi client or access point
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/python3 /opt/rtlsdr-pi/app/wifi_bringup.py
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

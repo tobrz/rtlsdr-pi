@@ -1,0 +1,14 @@
+[Unit]
+Description=Install the RTL-SDR decode toolchain once a route exists
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/rtlsdr-pi/bootstrap.sh
+RemainAfterExit=yes
+Restart=on-failure
+RestartSec=20
+
+[Install]
+WantedBy=multi-user.target

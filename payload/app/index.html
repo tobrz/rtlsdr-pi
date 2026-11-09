@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RTL-SDR</title>
+<style>
+:root{--bg:#0d1117;--card:#161b22;--line:#30363d;--fg:#e6edf3;--mut:#8b949e;--acc:#2f81f7;--ok:#3fb950;--warn:#d29922;--bad:#f85149}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+header{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+h1{font-size:18px;margin:0;letter-spacing:.5px}
+main{max-width:860px;margin:0 auto;padding:16px;display:flex;flex-direction:column;gap:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+.card h2{margin:0 0 12px;font-size:14px;text-transform:uppercase;letter-spacing:.5px;color:var(--mut)}
+.pill{font-size:12px;padding:3px 9px;border-radius:999px;border:1px solid var(--line);color:var(--mut)}
+.pill.on{color:var(--ok);border-color:var(--ok)}
+.pill.off{color:var(--bad);border-color:var(--bad)}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+button{font:inherit;background:#21262d;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:9px 14px;cursor:pointer}
+button:hover{border-color:var(--acc)}
+button.primary{background:var(--acc);border-color:var(--acc);color:#fff}
+button.stop{background:var(--bad);border-color:var(--bad);color:#fff}
+button:disabled{opacity:.4;cursor:not-allowed}
+button.mode.sel{background:var(--acc);border-color:var(--acc);color:#fff}
+select,input{font:inherit;background:#0d1117;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+label{font-size:13px;color:var(--mut);display:block;margin-bottom:4px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+th{color:var(--mut);font-weight:600}
+td.msg{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;white-space:normal}
+.mut{color:var(--mut)}
+.big{font-size:26px;font-weight:700}
+.stats{display:flex;gap:24px;flex-wrap:wrap}
+.stat{min-width:90px}
+.note{font-size:13px;color:var(--mut);margin-top:8px}
+.err{color:var(--bad)}
+.hide{display:none}
+#login{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:50}
+#login .card{width:min(340px,92vw)}
+pre{white-space:pre-wrap;font-size:12px;color:var(--mut);max-height:220px;overflow:auto}
+a{color:var(--acc)}
+</style>
+</head>
+<body>
+<div id="login">
+  <div class="card">
+    <h2>RTL-SDR</h2>
+    <label for="pw">Password</label>
+    <input id="pw" type="password" placeholder="rtlsdr-pi" style="width:100%">
+    <div class="note" id="loginNote">Factory password: rtlsdr-pi</div>
+    <div class="row" style="margin-top:12px"><button class="primary" onclick="login()">Sign in</button></div>
+    <div class="err" id="loginErr"></div>
+  </div>
+</div>
+
+<header>
+  <h1>📡 RTL-SDR</h1>
+  <span class="pill" id="pDongle">dongle ?</span>
+  <span class="pill" id="pMode">idle</span>
+  <span class="pill" id="pWifi">wifi ?</span>
+  <span class="pill" id="pRev" title="installed revision"></span>
+</header>
+
+<main class="hide" id="app">
+  <div class="card">
+    <h2>Decode</h2>
+    <div class="row" style="margin-bottom:12px">
+      <button class="mode" data-mode="ft8" onclick="pickMode('ft8')">FT8</button>
+      <button class="mode" data-mode="wspr" onclick="pickMode('wspr')">WSPR</button>
+      <button class="mode" data-mode="adsb" onclick="pickMode('adsb')">ADS-B (1090)</button>
+    </div>
+    <div class="row" id="bandRow">
+      <div><label for="band">Band</label><select id="band"></select></div>
+      <div style="align-self:flex-end"><button class="primary" id="startBtn" onclick="start()">Start</button>
+      <button class="stop" id="stopBtn" onclick="stop()">Stop</button></div>
+    </div>
+    <div class="note" id="controlNote"></div>
+    <div class="err" id="controlErr"></div>
+  </div>
+
+  <div class="card" id="liveCard">
+    <h2>Live</h2>
+    <div class="stats">
+      <div class="stat"><div class="big" id="cDecodes">0</div><div class="mut">decodes</div></div>
+      <div class="stat"><div class="big" id="cCalls">0</div><div class="mut">unique calls</div></div>
+      <div class="stat"><div class="big" id="cCycles">0</div><div class="mut">cycles</div></div>
+      <div class="stat"><div class="big" id="cAir">—</div><div class="mut">aircraft</div></div>
+    </div>
+    <div id="decodeWrap" style="margin-top:14px;overflow:auto">
+      <table id="decodeTbl"><thead><tr><th>UTC</th><th>SNR</th><th>DT</th><th>Hz</th><th>Message</th></tr></thead><tbody></tbody></table>
+    </div>
+    <div class="note" id="liveNote"></div>
+  </div>
+
+  <div class="card">
+    <h2>Radio settings</h2>
+    <div class="row">
+      <div><label for="gain">RF gain (dB)</label><input id="gain" type="number" step="0.1" style="width:110px"></div>
+      <div><label for="ppm">Freq. correction (ppm)</label><input id="ppm" type="number" step="1" style="width:110px"></div>
+      <div><label for="adsbGain">ADS-B gain (blank=auto)</label><input id="adsbGain" type="text" style="width:130px"></div>
+      <div style="align-self:flex-end"><button onclick="saveConfig()">Save</button></div>
+    </div>
+    <div class="note" id="cfgNote"></div>
+  </div>
+
+  <div class="card">
+    <h2>Wi-Fi</h2>
+    <div class="note" id="wifiState"></div>
+    <div class="row" style="margin-top:8px">
+      <button onclick="scanWifi()">Scan</button>
+      <select id="ssidSel" class="hide"></select>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <div><label for="ssid">Network (SSID)</label><input id="ssid"></div>
+      <div><label for="wpw">Password</label><input id="wpw" type="password"></div>
+      <div style="align-self:flex-end"><button class="primary" onclick="saveWifi()">Save &amp; join</button></div>
+    </div>
+    <div class="note" id="wifiNote"></div>
+  </div>
+
+  <div class="card">
+    <h2>Maintenance</h2>
+    <div class="row">
+      <button onclick="checkUpdate()">Check for update</button>
+      <button class="primary" onclick="doUpdate()">Update from git</button>
+      <button onclick="changePw()">Change password</button>
+    </div>
+    <pre id="updateLog"></pre>
+  </div>
+</main>
+
+<script>
+let TOKEN = sessionStorage.getItem("rtlsdr-pw") || "";
+let MODE = "ft8", BANDS = [], STATUS = {};
+
+function api(path, opts){
+  opts = opts || {};
+  opts.headers = Object.assign({"Content-Type":"application/json","X-Rtlsdr-Password":TOKEN}, opts.headers||{});
+  return fetch(path, opts).then(async r=>{
+    const t = await r.text();
+    let d = {}; try{ d = t?JSON.parse(t):{}; }catch(e){ d = {error:t}; }
+    if(r.status===401){ showLogin(); throw new Error(d.error||"Sign in"); }
+    if(!r.ok) throw new Error(d.error||("HTTP "+r.status));
+    return d;
+  });
+}
+function showLogin(){ document.getElementById("login").classList.remove("hide"); document.getElementById("app").classList.add("hide"); }
+function hideLogin(){ document.getElementById("login").classList.add("hide"); document.getElementById("app").classList.remove("hide"); }
+
+function login(){
+  const pw = document.getElementById("pw").value;
+  fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:pw})})
+    .then(r=>r.json().then(d=>({ok:r.ok,d})))
+    .then(({ok,d})=>{
+      if(!ok){ document.getElementById("loginErr").textContent = d.error||"Wrong password."; return; }
+      TOKEN = pw; sessionStorage.setItem("rtlsdr-pw", pw);
+      document.cookie = "rtlsdr-password="+encodeURIComponent(pw)+";path=/;max-age=31536000";
+      hideLogin(); boot();
+    });
+}
+
+function pickMode(m){
+  MODE = m;
+  document.querySelectorAll("button.mode").forEach(b=>b.classList.toggle("sel", b.dataset.mode===m));
+  document.getElementById("bandRow").style.display = (m==="adsb") ? "none" : "flex";
+  fillBands();
+}
+function fillBands(){
+  const sel = document.getElementById("band");
+  sel.innerHTML = "";
+  BANDS.forEach(b=>{
+    const o = document.createElement("option");
+    const reach = b.reach==="direct" ? "" : "  (needs upconverter)";
+    o.value = b.band; o.textContent = b.band+"  "+b[MODE]+" MHz"+reach;
+    if(b.reach!=="direct") o.disabled = true;
+    sel.appendChild(o);
+  });
+  const ten = [...sel.options].find(o=>o.value==="10m" && !o.disabled);
+  if(ten) ten.selected = true;
+}
+
+function start(){
+  document.getElementById("controlErr").textContent="";
+  const band = document.getElementById("band").value;
+  api("/api/start",{method:"POST",body:JSON.stringify({mode:MODE,band:band})})
+    .then(()=>refresh()).catch(e=>document.getElementById("controlErr").textContent=e.message);
+}
+function stop(){ api("/api/stop",{method:"POST",body:"{}"}).then(()=>refresh()).catch(()=>{}); }
+
+function refresh(){
+  api("/api/status").then(s=>{
+    STATUS = s;
+    const tools = s.tools||{}, sdr = s.sdr||{}, wifi = s.wifi||{};
+    setPill("pDongle", s.dongle, s.dongle?"dongle ok":"no dongle");
+    setPill("pMode", sdr.running, (sdr.running?sdr.mode.toUpperCase()+(sdr.band?" "+sdr.band:""):"idle"), !sdr.running);
+    const wl = wifi.ap_up ? "AP "+(wifi.ap_ssid||"") : (wifi.client_connected ? "wifi ok" : "wifi …");
+    setPill("pWifi", wifi.client_connected||wifi.ap_up, wl);
+    document.getElementById("pRev").textContent = s.revision ? "rev "+s.revision : "";
+    document.getElementById("cDecodes").textContent = sdr.decodes||0;
+    document.getElementById("cCalls").textContent = sdr.unique_calls||0;
+    document.getElementById("cCycles").textContent = sdr.cycles||0;
+    document.getElementById("cAir").textContent = (sdr.mode==="adsb" && sdr.adsb) ? (sdr.adsb.with_position+"/"+sdr.adsb.count) : "—";
+    document.getElementById("controlNote").textContent = sdr.last||"";
+    // disable modes whose tools are missing
+    document.querySelectorAll("button.mode").forEach(b=>{ b.disabled = !tools[b.dataset.mode]; });
+    document.getElementById("startBtn").disabled = sdr.running;
+    document.getElementById("stopBtn").disabled = !sdr.running;
+    // wifi summary
+    const addrs = (wifi.addresses||[]).map(a=>a.iface+" "+a.cidr).join(", ");
+    document.getElementById("wifiState").textContent =
+      (wifi.ap_up?("Access point "+wifi.ap_ssid+" at "+wifi.ap_address+". "):"")+
+      (wifi.client_connected?"Joined Wi-Fi. ":"")+ (addrs?("Addresses: "+addrs):"")+
+      ((wifi.known&&wifi.known.length)?("  Known: "+wifi.known.map(k=>k.ssid).join(", ")):"");
+  }).catch(()=>{});
+  if(MODE!=="adsb" || (STATUS.sdr&&STATUS.sdr.mode!=="adsb")) loadDecodes();
+}
+
+function loadDecodes(){
+  api("/api/decodes?limit=120").then(d=>{
+    const tb = document.querySelector("#decodeTbl tbody"); tb.innerHTML="";
+    (d.decodes||[]).forEach(r=>{
+      const tr = document.createElement("tr");
+      const hz = r.audio_hz!==undefined ? r.audio_hz : (r.freq_mhz||"");
+      tr.innerHTML = `<td>${r.when||""}</td><td>${r.snr}</td><td>${(r.dt||0).toFixed(1)}</td><td>${hz}</td><td class="msg">${esc(r.message||"")}</td>`;
+      tb.appendChild(tr);
+    });
+    document.getElementById("liveNote").textContent = (d.decodes&&d.decodes.length)?"":"No decodes yet. On FT8/WSPR the first ones arrive after a full cycle.";
+  }).catch(()=>{});
+}
+
+function saveConfig(){
+  const body = {gain:parseFloat(document.getElementById("gain").value),
+                ppm:parseInt(document.getElementById("ppm").value||"0",10),
+                adsb_gain:document.getElementById("adsbGain").value};
+  api("/api/config",{method:"POST",body:JSON.stringify(body)})
+    .then(d=>{document.getElementById("cfgNote").textContent="Saved. Takes effect next cycle (restart the mode for ADS-B).";})
+    .catch(e=>document.getElementById("cfgNote").textContent=e.message);
+}
+function loadConfig(){
+  api("/api/config").then(d=>{const c=d.config||{};
+    document.getElementById("gain").value=c.gain; document.getElementById("ppm").value=c.ppm;
+    document.getElementById("adsbGain").value=c.adsb_gain||"";}).catch(()=>{});
+}
+
+function scanWifi(){
+  document.getElementById("wifiNote").textContent="Scanning…";
+  api("/api/wifi/scan").then(d=>{
+    const sel=document.getElementById("ssidSel"); sel.innerHTML=""; sel.classList.remove("hide");
+    (d.networks||[]).forEach(n=>{const o=document.createElement("option");o.value=n.ssid;o.textContent=n.ssid+"  ("+n.signal+"%)";sel.appendChild(o);});
+    sel.onchange=()=>{document.getElementById("ssid").value=sel.value;};
+    if(sel.options.length){document.getElementById("ssid").value=sel.value;}
+    document.getElementById("wifiNote").textContent=(d.networks||[]).length+" networks found.";
+  }).catch(e=>document.getElementById("wifiNote").textContent=e.message);
+}
+function saveWifi(){
+  const ssid=document.getElementById("ssid").value, password=document.getElementById("wpw").value;
+  document.getElementById("wifiNote").textContent="Saving and joining…";
+  api("/api/wifi",{method:"POST",body:JSON.stringify({ssid,password})})
+    .then(d=>{document.getElementById("wifiNote").textContent = d.warning?("Saved. "+d.warning):("Saved. "+(d.mode?JSON.stringify(d.mode):""))+" — if it joined your LAN, reach it at http://rtlsdr.local";})
+    .catch(e=>document.getElementById("wifiNote").textContent=e.message);
+}
+
+function checkUpdate(){
+  document.getElementById("updateLog").textContent="Checking…";
+  api("/api/update/check").then(d=>{document.getElementById("updateLog").textContent=d.log||d.note||"";})
+    .catch(e=>document.getElementById("updateLog").textContent=e.message);
+}
+function doUpdate(){
+  document.getElementById("updateLog").textContent="Updating…";
+  api("/api/update",{method:"POST",body:"{}"}).then(d=>{document.getElementById("updateLog").textContent=(d.note||"Updated.")+"\nrevision "+(d.revision||"");})
+    .catch(e=>document.getElementById("updateLog").textContent=e.message);
+}
+function changePw(){
+  const p=prompt("New password (at least 8 characters):"); if(!p) return;
+  api("/api/password",{method:"POST",body:JSON.stringify({password:p})})
+    .then(()=>{TOKEN=p;sessionStorage.setItem("rtlsdr-pw",p);document.cookie="rtlsdr-password="+encodeURIComponent(p)+";path=/;max-age=31536000";alert("Password changed.");})
+    .catch(e=>alert(e.message));
+}
+
+function setPill(id, good, text, neutral){
+  const el=document.getElementById(id); el.textContent=text;
+  el.classList.remove("on","off"); if(neutral) return;
+  el.classList.add(good?"on":"off");
+}
+function esc(s){return (s+"").replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+
+function boot(){
+  api("/api/bands").then(d=>{BANDS=d.bands||[];pickMode("ft8");}).catch(()=>{});
+  loadConfig(); refresh();
+  clearInterval(window._t1); clearInterval(window._t2);
+  window._t1=setInterval(refresh,2500);
+}
+// first load
+fetch("/api/login-info").then(r=>r.json()).then(info=>{
+  if(info.factory) document.getElementById("loginNote").textContent="Factory password: rtlsdr-pi (change it under Maintenance).";
+  if(TOKEN){ api("/api/status").then(()=>{hideLogin();boot();}).catch(()=>showLogin()); }
+  else showLogin();
+}).catch(()=>showLogin());
+</script>
+</body>
+</html>
