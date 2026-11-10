@@ -49,6 +49,10 @@ a{color:var(--acc)}
 .chart .barfill{width:72%;border-radius:3px 3px 0 0;min-height:2px}
 .chart .barval{font-size:10px;color:var(--mut);position:absolute;top:-15px}
 .chart .barlab{font-size:9px;color:var(--mut);margin-top:3px;white-space:nowrap}
+.linechart{position:relative}
+.linechart svg{display:block;overflow:visible}
+.chartLegend{display:flex;gap:18px;font-size:12px;color:var(--mut);margin:0 0 6px}
+.chartTip{position:absolute;top:0;background:#0d1117;border:1px solid var(--line);border-radius:6px;padding:6px 9px;font-size:11px;color:var(--fg);pointer-events:none;white-space:nowrap;z-index:5;line-height:1.5}
 </style>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -174,10 +178,12 @@ a{color:var(--acc)}
       <button class="dwin" data-d="60" onclick="setDays(60)">60d</button>
       <button class="dwin" data-d="90" onclick="setDays(90)">90d</button>
     </div>
-    <div class="mut" style="margin-bottom:2px">Unique stations / day</div>
-    <div id="statStations" class="chart"></div>
-    <div class="mut" style="margin:18px 0 2px">Countries / day</div>
-    <div id="statCountries" class="chart"></div>
+    <div class="chartLegend">
+      <span><span style="color:var(--acc)">●</span> Unique stations</span>
+      <span><span style="color:var(--ok)">●</span> Countries</span>
+    </div>
+    <div id="statChart" class="linechart"></div>
+    <div class="note" style="margin-top:4px">Hover a day to see its stations &amp; countries.</div>
   </div>
 
   <div class="card">
@@ -421,22 +427,46 @@ function changePw(){
 }
 
 // ---- daily stats charts ----
-function renderBars(id, days, key, color){
-  const el=document.getElementById(id); if(!el) return;
-  if(!days.length){ el.innerHTML='<span class="mut">No data yet.</span>'; return; }
-  const max=Math.max(1,...days.map(d=>d[key]||0));
-  el.innerHTML=days.map(d=>{
-    const h=Math.round((d[key]||0)/max*100);
-    return `<div class="bar" title="${d.day}: ${d[key]||0}"><div class="barval">${d[key]||0}</div><div class="barfill" style="height:${h}%;background:${color}"></div><div class="barlab">${d.day.slice(5)}</div></div>`;
-  }).join("");
+function renderStatsChart(days){
+  const host=document.getElementById("statChart"); if(!host) return;
+  if(!days.length){ host.innerHTML='<span class="mut">No data yet.</span>'; return; }
+  const W=640,H=170,padL=10,padR=10,padT=12,padB=24,plotW=W-padL-padR,plotH=H-padT-padB,n=days.length;
+  const maxV=Math.max(1,...days.map(d=>Math.max(d.stations||0,d.countries||0)));
+  const gap=n>1?plotW/(n-1):0;
+  const X=i=> n>1? padL+i*gap : padL+plotW/2;
+  const Y=v=> padT+plotH-(v/maxV)*plotH;
+  const line=k=>days.map((d,i)=>`${X(i).toFixed(1)},${Y(d[k]||0).toFixed(1)}`).join(" ");
+  const dots=(k,c)=>days.map((d,i)=>`<circle cx="${X(i).toFixed(1)}" cy="${Y(d[k]||0).toFixed(1)}" r="2.4" fill="${c}"/>`).join("");
+  const step=Math.max(1,Math.ceil(n/7));
+  let labels="";
+  days.forEach((d,i)=>{ if(i%step===0||i===n-1){ labels+=`<text x="${X(i).toFixed(1)}" y="${H-7}" fill="var(--mut)" font-size="9" text-anchor="middle">${d.day.slice(5)}</text>`; }});
+  host.innerHTML=
+    `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="xMidYMid meet">`+
+      `<line id="statCur" x1="0" y1="${padT}" x2="0" y2="${padT+plotH}" stroke="var(--line)" stroke-width="1" style="display:none"/>`+
+      `<polyline fill="none" stroke="var(--acc)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" points="${line('stations')}"/>`+
+      `<polyline fill="none" stroke="var(--ok)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" points="${line('countries')}"/>`+
+      dots('stations','var(--acc)')+dots('countries','var(--ok)')+labels+
+    `</svg><div id="statTip" class="chartTip" style="display:none"></div>`;
+  const svg=host.querySelector("svg"), tip=host.querySelector("#statTip"), cur=host.querySelector("#statCur");
+  svg.addEventListener("mousemove",evt=>{
+    const r=svg.getBoundingClientRect();
+    let i=Math.round(((evt.clientX-r.left)/r.width*W-padL)/(gap||1));
+    i=Math.max(0,Math.min(n-1,i));
+    const d=days[i];
+    cur.style.display=""; cur.setAttribute("x1",X(i)); cur.setAttribute("x2",X(i));
+    tip.style.display="";
+    tip.innerHTML=`<b>${d.day}</b><br><span style="color:var(--acc)">●</span> ${d.stations||0} stations<br><span style="color:var(--ok)">●</span> ${d.countries||0} countries`;
+    const pct=X(i)/W*100;
+    tip.style.left=pct+"%";
+    tip.style.transform=pct>60?"translateX(-100%)":"translateX(0)";
+  });
+  host.addEventListener("mouseleave",()=>{tip.style.display="none";cur.style.display="none";});
 }
 let STAT_DAYS=14;
 function setDays(d){ STAT_DAYS=d; document.querySelectorAll("button.dwin").forEach(b=>b.classList.toggle("sel",+b.dataset.d===d)); loadStats(); }
 function loadStats(){
   api("/api/stats?days="+STAT_DAYS).then(d=>{
-    const days=d.days||[];
-    renderBars("statStations", days, "stations", "var(--acc)");
-    renderBars("statCountries", days, "countries", "var(--ok)");
+    renderStatsChart(d.days||[]);
   }).catch(()=>{});
 }
 
