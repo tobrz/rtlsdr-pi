@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 import urllib.request
 
 # jt9 FT8 line:  HHMMSS  SNR  DT  FreqHz ~  MESSAGE
@@ -59,6 +60,71 @@ def capture_wav(dial_mhz, seconds, out_path, gain=40, ppm=0, rate=12000):
         return False, "no audio captured (dongle busy or unplugged?)"
     os.replace(tmp, out_path)
     return True, ""
+
+
+# --- dongle recovery ----------------------------------------------------
+# An RTL-SDR can wedge: rtl_fm keeps running but the dongle stops producing
+# samples, so every capture comes back empty. A power cycle fixes it, but so
+# does a USB port reset (the USBDEVFS_RESET ioctl, same as the classic
+# usbreset.c). The watchdog in sdr.Controller._loop calls reset_dongle() after
+# a few failed captures in a row, so the appliance heals itself unattended.
+
+RTL_VID = "0bda"   # Realtek
+RTL_PID = "2838"   # RTL2838 (RTL2832U)
+USBDEVFS_RESET = (ord("U") << 8) | 20   # _IO('U', 20) == 0x5514
+
+
+def _usb_devices_matching(vid, pid):
+    """(busnum, devnum) for every USB device matching vid/pid, via sysfs."""
+    base = "/sys/bus/usb/devices"
+    found = []
+    try:
+        names = os.listdir(base)
+    except OSError:
+        return found
+    for name in names:
+        node = os.path.join(base, name)
+
+        def _read(attr):
+            try:
+                with open(os.path.join(node, attr)) as handle:
+                    return handle.read().strip()
+            except OSError:
+                return ""
+        if _read("idVendor").lower() != vid or _read("idProduct").lower() != pid:
+            continue
+        bus, dev = _read("busnum"), _read("devnum")
+        if bus.isdigit() and dev.isdigit():
+            found.append((int(bus), int(dev)))
+    return found
+
+
+def reset_dongle(vid=RTL_VID, pid=RTL_PID):
+    """USB-port-reset the RTL-SDR to clear a wedge. Returns (ok, detail)."""
+    import fcntl
+    # Drop any capture still clinging to the device before we reset it.
+    for name in ("rtl_fm", "rtl_sdr", "rtl_test"):
+        subprocess.run(["pkill", "-9", "-x", name], check=False)
+    time.sleep(1)
+    devices = _usb_devices_matching(vid, pid)
+    if not devices:
+        return False, "dongle not found on USB (unplugged?)"
+    done = []
+    for bus, dev in devices:
+        path = "/dev/bus/usb/%03d/%03d" % (bus, dev)
+        try:
+            fd = os.open(path, os.O_WRONLY)
+        except OSError as exc:
+            return False, "open %s failed: %s" % (path, exc)
+        try:
+            fcntl.ioctl(fd, USBDEVFS_RESET, 0)
+            done.append(path)
+        except OSError as exc:
+            return False, "reset %s failed: %s" % (path, exc)
+        finally:
+            os.close(fd)
+    time.sleep(2)   # let the kernel re-enumerate before the next capture
+    return True, "USB reset " + ", ".join(done)
 
 
 def _run(cmd, timeout):

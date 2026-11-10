@@ -31,6 +31,7 @@ WSPR_PERIOD = 120
 FT8_CAPTURE = 13          # seconds of audio per 15 s cycle
 WSPR_CAPTURE = 114        # seconds of audio per 120 s cycle
 MARGIN = 0.8              # start capture just after the boundary
+RESET_AFTER_FAILS = 3     # empty captures in a row before a USB reset of the dongle
 
 DEFAULTS = {"gain": 40.0, "ppm": 0, "adsb_gain": "", "flightaware": False,
             "mygrid": "EN53hb", "mycall": "N9TPB", "pskreporter": True}
@@ -272,6 +273,7 @@ class Controller:
         cap = FT8_CAPTURE if mode == "ft8" else WSPR_CAPTURE
         dial = bands.dial_mhz(band, mode)
         wav = os.path.join(WORK, f"{mode}.wav")
+        fails = 0                       # consecutive empty captures
         while not self._stop.is_set():
             now = time.time()
             wait = period - (now % period) + MARGIN
@@ -286,8 +288,17 @@ class Controller:
             if self._stop.is_set():
                 break
             if not ok:
-                self._note(f"capture failed: {detail}")
+                fails += 1
+                self._note(f"capture failed: {detail}" + (f" (x{fails})" if fails > 1 else ""))
+                # A wedged dongle produces empty captures forever; after a few
+                # in a row, USB-reset it so the appliance recovers on its own.
+                if fails >= RESET_AFTER_FAILS:
+                    self._note("no audio — resetting the dongle (USB)")
+                    r_ok, r_detail = decoders.reset_dongle()
+                    self._note(("dongle recovered: " if r_ok else "dongle reset failed: ") + r_detail)
+                    fails = 0
                 continue
+            fails = 0
             try:
                 if mode == "ft8":
                     rows = decoders.decode_ft8(wav, dial, when=stamp)
