@@ -32,7 +32,8 @@ FT8_CAPTURE = 13          # seconds of audio per 15 s cycle
 WSPR_CAPTURE = 114        # seconds of audio per 120 s cycle
 MARGIN = 0.8              # start capture just after the boundary
 
-DEFAULTS = {"gain": 40.0, "ppm": 0, "adsb_gain": "", "flightaware": False, "mygrid": "EN53hb"}
+DEFAULTS = {"gain": 40.0, "ppm": 0, "adsb_gain": "", "flightaware": False,
+            "mygrid": "EN53hb", "mycall": "N9TPB", "pskreporter": True}
 
 
 def load_config():
@@ -167,6 +168,11 @@ class Controller:
         self._calls = set()
         self._cycles = 0
         self._decodes = 0
+        self._pending = {}          # callsign -> spot tuple, flushed to PSKReporter
+        self._reporter = None
+        self._report_note = ""
+        self._spotted = 0
+        threading.Thread(target=self._report_loop, daemon=True).start()
 
     # ---- public API ----
 
@@ -240,6 +246,9 @@ class Controller:
                 "cycles": self._cycles,
                 "decodes": self._decodes,
                 "unique_calls": len(self._calls),
+                "psk": self._report_note,
+                "spotted": self._spotted,
+                "pending": len(self._pending),
                 "adsb": adsb,
             }
 
@@ -291,16 +300,53 @@ class Controller:
             self._note(f"{len(rows)} decode(s) at {stamp} UTC")
 
     def _ingest(self, rows, band):
+        now = time.time()
         with self._lock:
             self._cycles += 1
             for row in rows:
                 row["band"] = band
                 self._recent.append(row)
                 self._decodes += 1
-                for call in row.get("callers", []):
+                callers = row.get("callers", [])
+                for call in callers:
                     self._calls.add(call)
+                sender = callers[-1] if callers else ""   # the station that transmitted
+                if sender:
+                    self._pending[sender] = (sender, row.get("freq_hz") or 0, row.get("snr") or 0,
+                                             row.get("grid") or "", row.get("mode") or "FT8", now)
         self._append_log(rows)
         self._log_db(rows)
+
+    def _report_loop(self):
+        """Flush accumulated spots to PSKReporter every ~5 minutes (its minimum)."""
+        import random as _r
+        try:
+            import pskreporter
+        except Exception:
+            return
+        while True:
+            time.sleep(300 + _r.uniform(0, 45))
+            cfg = load_config()
+            if not cfg.get("pskreporter", True):
+                continue
+            call = (cfg.get("mycall") or "").strip().upper()
+            grid = (cfg.get("mygrid") or "").strip()
+            if not call:
+                self._report_note = "PSKReporter idle: set your callsign"
+                continue
+            with self._lock:
+                spots = list(self._pending.values())
+                self._pending = {}
+            if not spots:
+                continue
+            try:
+                if self._reporter is None or self._reporter.call != call:
+                    self._reporter = pskreporter.Reporter(call, grid)
+                self._reporter.send(spots)
+                self._spotted += len(spots)
+                self._report_note = "spotted %d to PSKReporter @ %s" % (len(spots), time.strftime("%H:%M:%SZ", time.gmtime()))
+            except Exception as exc:  # noqa: BLE901
+                self._report_note = "PSKReporter error: %s" % exc
 
     def _log_db(self, rows):
         if not rows:

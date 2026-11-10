@@ -24,6 +24,7 @@ button.stop{background:var(--bad);border-color:var(--bad);color:#fff}
 button:disabled{opacity:.4;cursor:not-allowed}
 button.mode.sel{background:var(--acc);border-color:var(--acc);color:#fff}
 button.win.sel{background:var(--acc);border-color:var(--acc);color:#fff}
+button.dwin.sel{background:var(--acc);border-color:var(--acc);color:#fff}
 select,input{font:inherit;background:#0d1117;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
 label{font-size:13px;color:var(--mut);display:block;margin-bottom:4px}
 table{width:100%;border-collapse:collapse;font-size:13px}
@@ -94,6 +95,7 @@ a{color:var(--acc)}
       <button class="stop" id="stopBtn" onclick="stop()">Stop</button></div>
     </div>
     <div class="note" id="controlNote"></div>
+    <div class="note" id="pskNote" style="color:var(--ok)"></div>
     <div id="owrxLink" class="hide" style="margin-top:10px">
       <div class="note" style="margin-bottom:8px">Live SDR running (OpenWebRX): blue/green waterfall + audio, tuned to 10m FT8. <b>Decoding &amp; logging are paused</b> while this is on — one dongle. Opens in a new tab; stop it (FT8 → Start) to resume logging.</div>
       <a class="button" id="owrxA" target="_blank" style="text-decoration:none;display:inline-block">↗ Open live waterfall</a>
@@ -133,7 +135,14 @@ a{color:var(--acc)}
   </div>
 
   <div class="card">
-    <h2>Daily stats (last 14 days)</h2>
+    <h2>Daily stats</h2>
+    <div class="row" style="margin-bottom:10px">
+      <button class="dwin" data-d="7" onclick="setDays(7)">7d</button>
+      <button class="dwin sel" data-d="14" onclick="setDays(14)">14d</button>
+      <button class="dwin" data-d="30" onclick="setDays(30)">30d</button>
+      <button class="dwin" data-d="60" onclick="setDays(60)">60d</button>
+      <button class="dwin" data-d="90" onclick="setDays(90)">90d</button>
+    </div>
     <div class="mut" style="margin-bottom:2px">Unique stations / day</div>
     <div id="statStations" class="chart"></div>
     <div class="mut" style="margin:18px 0 2px">Countries / day</div>
@@ -153,6 +162,8 @@ a{color:var(--acc)}
       <div><label for="ppm">Freq. correction (ppm)</label><input id="ppm" type="number" step="1" style="width:110px"></div>
       <div><label for="adsbGain">ADS-B gain (blank=auto)</label><input id="adsbGain" type="text" style="width:130px"></div>
       <div><label for="mygrid">Your grid (QTH)</label><input id="mygrid" type="text" style="width:110px" placeholder="EN53hb"></div>
+      <div><label for="mycall">Your callsign</label><input id="mycall" type="text" style="width:110px" placeholder="N9TPB"></div>
+      <div style="align-self:flex-end"><label style="display:flex;align-items:center;gap:6px;color:var(--fg);font-size:14px"><input type="checkbox" id="pskreporter"> Spot to PSKReporter</label></div>
       <div style="align-self:flex-end"><button onclick="saveConfig()">Save</button></div>
     </div>
     <div class="note" id="cfgNote"></div>
@@ -260,6 +271,10 @@ function refresh(){
     document.getElementById("cCycles").textContent = sdr.cycles||0;
     document.getElementById("cAir").textContent = (sdr.mode==="adsb" && sdr.adsb) ? (sdr.adsb.with_position+"/"+sdr.adsb.count) : "—";
     document.getElementById("controlNote").textContent = sdr.last||"";
+    const psk=document.getElementById("pskNote");
+    if(sdr.psk) psk.textContent="📡 "+sdr.psk+(sdr.pending?(" · "+sdr.pending+" queued"):"");
+    else if(sdr.running && (sdr.mode==="ft8"||sdr.mode==="wspr")) psk.textContent="📡 PSKReporter armed — "+(sdr.pending||0)+" queued (uploads every ~5 min)";
+    else psk.textContent="";
     const ol=document.getElementById("owrxLink");
     if(sdr.mode==="livesdr" && sdr.running){ document.getElementById("owrxA").href="http://"+location.hostname+":8073"; ol.classList.remove("hide"); }
     else ol.classList.add("hide");
@@ -294,7 +309,9 @@ function saveConfig(){
   const body = {gain:parseFloat(document.getElementById("gain").value),
                 ppm:parseInt(document.getElementById("ppm").value||"0",10),
                 adsb_gain:document.getElementById("adsbGain").value,
-                mygrid:document.getElementById("mygrid").value.trim()};
+                mygrid:document.getElementById("mygrid").value.trim(),
+                mycall:document.getElementById("mycall").value.trim(),
+                pskreporter:document.getElementById("pskreporter").checked};
   api("/api/config",{method:"POST",body:JSON.stringify(body)})
     .then(d=>{if(body.mygrid){MYGRID=body.mygrid; if(MAP){MAP.setView(gridToLatLon(MYGRID)||[43,-89]);} renderMap();}
       document.getElementById("cfgNote").textContent="Saved. Takes effect next cycle (restart the mode for ADS-B).";})
@@ -331,6 +348,8 @@ function loadConfig(){
     document.getElementById("gain").value=c.gain; document.getElementById("ppm").value=c.ppm;
     document.getElementById("adsbGain").value=c.adsb_gain||"";
     document.getElementById("mygrid").value=c.mygrid||"";
+    document.getElementById("mycall").value=c.mycall||"";
+    document.getElementById("pskreporter").checked=c.pskreporter!==false;
     if(c.mygrid) MYGRID=c.mygrid;
     initMap(); renderMap();}).catch(()=>{});
 }
@@ -380,8 +399,10 @@ function renderBars(id, days, key, color){
     return `<div class="bar" title="${d.day}: ${d[key]||0}"><div class="barval">${d[key]||0}</div><div class="barfill" style="height:${h}%;background:${color}"></div><div class="barlab">${d.day.slice(5)}</div></div>`;
   }).join("");
 }
+let STAT_DAYS=14;
+function setDays(d){ STAT_DAYS=d; document.querySelectorAll("button.dwin").forEach(b=>b.classList.toggle("sel",+b.dataset.d===d)); loadStats(); }
 function loadStats(){
-  api("/api/stats?days=14").then(d=>{
+  api("/api/stats?days="+STAT_DAYS).then(d=>{
     const days=d.days||[];
     renderBars("statStations", days, "stations", "var(--acc)");
     renderBars("statCountries", days, "countries", "var(--ok)");

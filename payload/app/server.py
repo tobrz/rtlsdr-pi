@@ -197,6 +197,10 @@ class Handler(BaseHTTPRequestHandler):
             out["adsb_gain"] = str(body.get("adsb_gain") or "")
         if "mygrid" in body:
             out["mygrid"] = str(body.get("mygrid") or "").strip()
+        if "mycall" in body:
+            out["mycall"] = str(body.get("mycall") or "").strip().upper()
+        if "pskreporter" in body:
+            out["pskreporter"] = bool(body.get("pskreporter"))
         if "flightaware" in body:
             out["flightaware"] = bool(body.get("flightaware"))
         return out
