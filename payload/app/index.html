@@ -41,6 +41,11 @@ td.msg{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;white-space:norma
 #login .card{width:min(340px,92vw)}
 pre{white-space:pre-wrap;font-size:12px;color:var(--mut);max-height:220px;overflow:auto}
 a{color:var(--acc)}
+.chart{display:flex;gap:3px;align-items:flex-end;height:120px;padding-top:16px}
+.chart .bar{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;position:relative;min-width:0}
+.chart .barfill{width:72%;border-radius:3px 3px 0 0;min-height:2px}
+.chart .barval{font-size:10px;color:var(--mut);position:absolute;top:-15px}
+.chart .barlab{font-size:9px;color:var(--mut);margin-top:3px;white-space:nowrap}
 </style>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -125,6 +130,14 @@ a{color:var(--acc)}
     <div style="overflow:auto;max-height:460px">
       <table id="histTbl"><thead><tr><th>UTC / Local</th><th>Mode</th><th>Band</th><th>SNR</th><th>Grid</th><th>Operator (via n9tpb.com)</th><th>Message</th></tr></thead><tbody></tbody></table>
     </div>
+  </div>
+
+  <div class="card">
+    <h2>Daily stats (last 14 days)</h2>
+    <div class="mut" style="margin-bottom:2px">Unique stations / day</div>
+    <div id="statStations" class="chart"></div>
+    <div class="mut" style="margin:18px 0 2px">Countries / day</div>
+    <div id="statCountries" class="chart"></div>
   </div>
 
   <div class="card">
@@ -357,6 +370,24 @@ function changePw(){
     .catch(e=>alert(e.message));
 }
 
+// ---- daily stats charts ----
+function renderBars(id, days, key, color){
+  const el=document.getElementById(id); if(!el) return;
+  if(!days.length){ el.innerHTML='<span class="mut">No data yet.</span>'; return; }
+  const max=Math.max(1,...days.map(d=>d[key]||0));
+  el.innerHTML=days.map(d=>{
+    const h=Math.round((d[key]||0)/max*100);
+    return `<div class="bar" title="${d.day}: ${d[key]||0}"><div class="barval">${d[key]||0}</div><div class="barfill" style="height:${h}%;background:${color}"></div><div class="barlab">${d.day.slice(5)}</div></div>`;
+  }).join("");
+}
+function loadStats(){
+  api("/api/stats?days=14").then(d=>{
+    const days=d.days||[];
+    renderBars("statStations", days, "stations", "var(--acc)");
+    renderBars("statCountries", days, "countries", "var(--ok)");
+  }).catch(()=>{});
+}
+
 // ---- map ----
 let MAP=null, MAPLAYER=null, MYGRID="EN53hb";
 function gridToLatLon(g){
@@ -445,11 +476,11 @@ function boot(){
   api("/api/bands").then(d=>{BANDS=d.bands||[];pickMode("ft8");}).catch(()=>{});
   loadConfig(); refresh();
   clearInterval(window._t1); clearInterval(window._t2);
-  loadHistory();
+  loadHistory(); loadStats();
   tickClock(); tickCycle();
   clearInterval(window._t3);
   window._t1=setInterval(refresh,2500);
-  window._t2=setInterval(()=>{renderMap();loadHistory();},20000);
+  window._t2=setInterval(()=>{renderMap();loadHistory();loadStats();},20000);
   window._t3=setInterval(()=>{tickClock();tickCycle();},200);
 }
 // Enter key submits the login form

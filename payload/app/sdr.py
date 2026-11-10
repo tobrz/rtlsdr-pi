@@ -17,6 +17,7 @@ import time
 
 import bands
 import decoders
+import dxcc
 
 DATA = os.environ.get("RTLSDR_DATA", "/var/lib/rtlsdr-pi")
 CONFIG_PATH = os.path.join(DATA, "config.json")
@@ -122,6 +123,30 @@ def db_query(window=0, limit=500):
     conn.close()
     cols = ["when", "mode", "band", "snr", "dt", "freq_hz", "message", "grid", "caller", "ts"]
     return {"decodes": [dict(zip(cols, r)) for r in rows], "count": count, "stations": stations}
+
+
+def db_daily_stats(days=14):
+    """Per-day unique station + country counts (local day boundaries), oldest first."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+    except sqlite3.Error:
+        return {"days": []}
+    since = time.time() - days * 86400
+    try:
+        rows = conn.execute("SELECT ts, caller FROM decodes WHERE ts > ? AND caller<>''", (since,)).fetchall()
+    except sqlite3.Error:
+        conn.close()
+        return {"days": []}
+    conn.close()
+    stn, ctry = collections.defaultdict(set), collections.defaultdict(set)
+    for ts, caller in rows:
+        day = time.strftime("%Y-%m-%d", time.localtime(ts))
+        stn[day].add(caller)
+        ctry[day].add(dxcc.country(caller))
+    return {"days": [
+        {"day": d, "stations": len(stn[d]), "countries": len(ctry.get(d, set()))}
+        for d in sorted(set(stn) | set(ctry))
+    ]}
 
 
 class Controller:

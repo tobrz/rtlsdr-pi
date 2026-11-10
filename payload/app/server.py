@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import bands
 import decoders
-from sdr import Controller, load_config, save_config, db_query
+from sdr import Controller, load_config, save_config, db_query, db_daily_stats
 from update import REPO, UpdateError, apply_update, check_update, read_revision
 from wifi import AP_ADDRESS, bringup, load_networks, save_networks, scan_wifi, wifi_state
 
@@ -113,6 +113,10 @@ class Handler(BaseHTTPRequestHandler):
             query = parse_qs(urlparse(self.path).query)
             calls = [c.strip() for c in (query.get("calls") or [""])[0].split(",") if c.strip()][:80]
             self._send(200, {"calls": lookup_calls(calls)})
+        elif path == "/api/stats":
+            query = parse_qs(urlparse(self.path).query)
+            days = _int((query.get("days") or ["14"])[0], 14)
+            self._send(200, db_daily_stats(max(1, min(days, 90))))
         elif path == "/api/counts":
             self._send(200, SDR.counts())
         elif path == "/api/adsb":
