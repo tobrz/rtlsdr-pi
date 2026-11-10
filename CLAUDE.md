@@ -56,6 +56,11 @@ unstable on this Pi (SDR source restarting every ~30s). So:
 - RTL-SDR has a **DC spike at the dial** and an **uncalibrated crystal** — set ppm in
   Radio settings. FT8 still decodes above ~200 Hz audio offset.
 - `rtl_fm` must be killed by `timeout`; `sox` then finalises the wav on EOF.
+- **Wedged dongle = self-healing.** An RTL-SDR sometimes stops producing samples
+  (rtl_fm keeps running, every capture is a 0-byte wav, the page says "no audio").
+  `decoders.reset_dongle()` does a `USBDEVFS_RESET` ioctl port reset (like
+  usbreset.c); the FT8/WSPR loop fires it after `RESET_AFTER_FAILS` (3) empty
+  captures in a row, so it recovers unattended — no SSH/power-cycle needed.
 - Owner is **N9TPB / EN53hb** (see Mac memory `ham-radio-n9tpb`). PSKReporter
   spotting + portal logging are planned, not yet wired.
 
