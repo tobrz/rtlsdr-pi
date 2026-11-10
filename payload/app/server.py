@@ -10,6 +10,8 @@ import json
 import os
 import subprocess
 import threading
+import urllib.parse
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -107,6 +109,10 @@ class Handler(BaseHTTPRequestHandler):
             window = _int((query.get("window") or ["0"])[0], 0)  # seconds back; 0 = all
             limit = _int((query.get("limit") or ["600"])[0], 600)
             self._send(200, db_query(window, limit))
+        elif path == "/api/calls":
+            query = parse_qs(urlparse(self.path).query)
+            calls = [c.strip() for c in (query.get("calls") or [""])[0].split(",") if c.strip()][:80]
+            self._send(200, {"calls": lookup_calls(calls)})
         elif path == "/api/counts":
             self._send(200, SDR.counts())
         elif path == "/api/adsb":
@@ -255,6 +261,41 @@ def password_from_cookie(header):
         if sep and name == "rtlsdr-password":
             return unquote(value)
     return ""
+
+
+_CALL_CACHE = {}
+CALLBOOK_URL = "https://n9tpb.com/nets/live/api/lookup?calls="
+
+
+def lookup_calls(calls):
+    """Operator name + QTH per callsign, from n9tpb.com's callbook. Cached (license data is stable)."""
+    out, need = {}, []
+    for c in calls:
+        c = (c or "").upper()
+        if not c:
+            continue
+        if c in _CALL_CACHE:
+            out[c] = _CALL_CACHE[c]
+        else:
+            need.append(c)
+    for i in range(0, len(need), 40):
+        batch = need[i:i + 40]
+        try:
+            req = urllib.request.Request(
+                CALLBOOK_URL + urllib.parse.quote(",".join(batch)),
+                headers={"User-Agent": "rtlsdr-pi"})
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                data = json.loads(resp.read().decode("utf-8", "replace"))
+            found = data.get("calls") or {}
+            for c in batch:
+                info = (found.get(c) or {}).get("info") or {}
+                rec = {k: info.get(k) for k in ("name", "city", "state", "class")} if info else {}
+                _CALL_CACHE[c] = rec
+                out[c] = rec
+        except Exception:  # noqa: BLE901 - network/parse failures just leave the call unresolved
+            for c in batch:
+                out[c] = {}
+    return out
 
 
 def read_history(limit=400):

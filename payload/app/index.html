@@ -114,7 +114,7 @@ a{color:var(--acc)}
     </div>
     <div class="mut" id="histNote" style="margin-bottom:8px"></div>
     <div style="overflow:auto;max-height:460px">
-      <table id="histTbl"><thead><tr><th>Time</th><th>Mode</th><th>Band</th><th>SNR</th><th>Grid</th><th>Message</th></tr></thead><tbody></tbody></table>
+      <table id="histTbl"><thead><tr><th>Time</th><th>Mode</th><th>Band</th><th>SNR</th><th>Grid</th><th>Operator (via n9tpb.com)</th><th>Message</th></tr></thead><tbody></tbody></table>
     </div>
   </div>
 
@@ -278,20 +278,29 @@ function saveConfig(){
       document.getElementById("cfgNote").textContent="Saved. Takes effect next cycle (restart the mode for ADS-B).";})
     .catch(e=>document.getElementById("cfgNote").textContent=e.message);
 }
-let HIST_WIN=600;
+let HIST_WIN=600, CALLS={};
 const WINLBL={600:"last 10 min",1800:"last 30 min",3600:"last hour",86400:"last 24 h",604800:"last week",0:"all time"};
 function setWin(w){ HIST_WIN=w; document.querySelectorAll("button.win").forEach(b=>b.classList.toggle("sel",+b.dataset.win===w)); loadHistory(); }
+function opText(call){ const i=CALLS[call]; if(!i||!i.name) return ""; return i.name+(i.city?" · "+i.city+(i.state?", "+i.state:""):""); }
+function enrichCalls(callers){
+  const need=[...new Set(callers.filter(c=>c && !(c in CALLS)))];
+  if(!need.length) return Promise.resolve();
+  return api("/api/calls?calls="+encodeURIComponent(need.join(","))).then(d=>{
+    Object.assign(CALLS, d.calls||{}); need.forEach(c=>{ if(!(c in CALLS)) CALLS[c]={}; });
+  }).catch(()=>{});
+}
 function loadHistory(){
   api("/api/history?window="+HIST_WIN+"&limit=600").then(d=>{
     const rows=d.decodes||[], tb=document.querySelector("#histTbl tbody"); tb.innerHTML="";
     rows.forEach(r=>{
       const tr=document.createElement("tr");
       const t=r.ts?new Date(r.ts*1000).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit",second:"2-digit"}):(r.when||"");
-      tr.innerHTML=`<td>${t}</td><td>${r.mode||""}</td><td>${r.band||""}</td><td>${r.snr}</td><td>${r.grid||""}</td><td class="msg">${esc(r.message||"")}</td>`;
+      tr.innerHTML=`<td>${t}</td><td>${r.mode||""}</td><td>${r.band||""}</td><td>${r.snr}</td><td>${r.grid||""}</td><td class="op" data-call="${r.caller||""}">${esc(opText(r.caller))}</td><td class="msg">${esc(r.message||"")}</td>`;
       tb.appendChild(tr);
     });
     const shown=rows.length<(d.count||0)?" — newest "+rows.length+" shown":"";
     document.getElementById("histNote").textContent=(d.count||0)+" decodes · "+(d.stations||0)+" unique stations ("+(WINLBL[HIST_WIN]||"")+")"+shown;
+    enrichCalls(rows.map(r=>r.caller)).then(()=>{ document.querySelectorAll("#histTbl td.op").forEach(td=>{ td.textContent=opText(td.dataset.call); }); });
   }).catch(e=>document.getElementById("histNote").textContent=e.message);
 }
 
