@@ -132,6 +132,7 @@ a{color:var(--acc)}
       <button class="win sel" data-win="600" onclick="setWin(600)">10 min</button>
       <button class="win" data-win="1800" onclick="setWin(1800)">30 min</button>
       <button class="win" data-win="3600" onclick="setWin(3600)">1 hr</button>
+      <button class="win" data-win="today" onclick="setWin('today')">Today</button>
       <button class="win" data-win="86400" onclick="setWin(86400)">24 hr</button>
       <button class="win" data-win="604800" onclick="setWin(604800)">Week</button>
       <button class="win" data-win="0" onclick="setWin(0)">All</button>
@@ -343,8 +344,12 @@ function saveConfig(){
     .catch(e=>document.getElementById("cfgNote").textContent=e.message);
 }
 let HIST_WIN=600, CALLS={};
-const WINLBL={600:"last 10 min",1800:"last 30 min",3600:"last hour",86400:"last 24 h",604800:"last week",0:"all time"};
-function setWin(w){ HIST_WIN=w; document.querySelectorAll("button.win").forEach(b=>b.classList.toggle("sel",+b.dataset.win===w)); loadHistory(); renderMap(); }
+const WINLBL={600:"last 10 min",1800:"last 30 min",3600:"last hour",today:"today",86400:"last 24 h",604800:"last week",0:"all time"};
+function winSecs(){ // seconds to request for the current window; "today" = since local midnight
+  if(HIST_WIN==="today"){ const n=new Date(), mid=new Date(n.getFullYear(),n.getMonth(),n.getDate()); return Math.ceil((n-mid)/1000); }
+  return HIST_WIN;
+}
+function setWin(w){ HIST_WIN=w; document.querySelectorAll("button.win").forEach(b=>b.classList.toggle("sel",b.dataset.win===String(w))); loadHistory(); renderMap(); }
 function opText(call){ const i=CALLS[call]; if(!i||!i.name) return ""; return i.name+(i.city?" · "+i.city+(i.state?", "+i.state:""):""); }
 function enrichCalls(callers){
   const need=[...new Set(callers.filter(c=>c && !(c in CALLS)))];
@@ -354,7 +359,7 @@ function enrichCalls(callers){
   }).catch(()=>{});
 }
 function loadHistory(){
-  api("/api/history?window="+HIST_WIN+"&limit=600").then(d=>{
+  api("/api/history?window="+winSecs()+"&limit=600").then(d=>{
     const rows=d.decodes||[], tb=document.querySelector("#histTbl tbody"); tb.innerHTML="";
     rows.forEach(r=>{
       const tr=document.createElement("tr");
@@ -460,7 +465,7 @@ function initMap(){
 }
 function renderMap(){
   if(!MAP){ initMap(); if(!MAP) return; }
-  api("/api/history?window="+HIST_WIN+"&limit=1500").then(d=>{
+  api("/api/history?window="+winSecs()+"&limit=1500").then(d=>{
     MAPLAYER.clearLayers();
     const home=gridToLatLon(MYGRID)||[43,-89];
     L.circleMarker(home,{radius:6,color:'#2f81f7',fillColor:'#2f81f7',fillOpacity:1,weight:2}).addTo(MAPLAYER).bindTooltip("You — "+MYGRID,{permanent:false});
