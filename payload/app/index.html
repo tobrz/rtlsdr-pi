@@ -280,7 +280,7 @@ function saveConfig(){
 }
 let HIST_WIN=600, CALLS={};
 const WINLBL={600:"last 10 min",1800:"last 30 min",3600:"last hour",86400:"last 24 h",604800:"last week",0:"all time"};
-function setWin(w){ HIST_WIN=w; document.querySelectorAll("button.win").forEach(b=>b.classList.toggle("sel",+b.dataset.win===w)); loadHistory(); }
+function setWin(w){ HIST_WIN=w; document.querySelectorAll("button.win").forEach(b=>b.classList.toggle("sel",+b.dataset.win===w)); loadHistory(); renderMap(); }
 function opText(call){ const i=CALLS[call]; if(!i||!i.name) return ""; return i.name+(i.city?" · "+i.city+(i.state?", "+i.state:""):""); }
 function enrichCalls(callers){
   const need=[...new Set(callers.filter(c=>c && !(c in CALLS)))];
@@ -371,22 +371,23 @@ function initMap(){
 }
 function renderMap(){
   if(!MAP){ initMap(); if(!MAP) return; }
-  api("/api/decodes?limit=400").then(d=>{
+  api("/api/history?window="+HIST_WIN+"&limit=1500").then(d=>{
     MAPLAYER.clearLayers();
     const home=gridToLatLon(MYGRID)||[43,-89];
     L.circleMarker(home,{radius:6,color:'#2f81f7',fillColor:'#2f81f7',fillOpacity:1,weight:2}).addTo(MAPLAYER).bindTooltip("You — "+MYGRID,{permanent:false});
     const seen={};
     (d.decodes||[]).forEach(r=>{
       const g=r.grid; if(!g) return;
-      const call=(r.callers&&r.callers[r.callers.length-1])||"";
+      const call=r.caller||"";
       const key=g+"|"+call; if(seen[key]) return; seen[key]=1;
       const ll=gridToLatLon(g); if(!ll) return;
-      L.polyline([home,ll],{color:'#2f81f7',weight:1,opacity:.3}).addTo(MAPLAYER);
+      L.polyline([home,ll],{color:'#2f81f7',weight:1,opacity:.25}).addTo(MAPLAYER);
+      const op=opText(call);
       L.circleMarker(ll,{radius:4,color:'#3fb950',fillColor:'#3fb950',fillOpacity:.9,weight:1}).addTo(MAPLAYER)
-        .bindTooltip((call||"?")+"  "+g+"  "+r.snr+"dB");
+        .bindTooltip((call||"?")+"  "+g+"  "+r.snr+"dB"+(op?" — "+op:""));
     });
     const n=Object.keys(seen).length;
-    document.getElementById("mapNote").textContent = n? (n+" stations plotted (from "+(d.decodes||[]).length+" recent decodes). Blue = you ("+MYGRID+").") : "No grids yet — stations show up here once one sends its grid square.";
+    document.getElementById("mapNote").textContent = n? (n+" stations with grids plotted ("+(WINLBL[HIST_WIN]||"")+"). Blue = you ("+MYGRID+"). Hover a dot for the operator.") : "No grids in this window yet — stations appear once one sends its grid square.";
   }).catch(()=>{});
 }
 
