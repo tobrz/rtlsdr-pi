@@ -61,6 +61,14 @@ unstable on this Pi (SDR source restarting every ~30s). So:
   `decoders.reset_dongle()` does a `USBDEVFS_RESET` ioctl port reset (like
   usbreset.c); the FT8/WSPR loop fires it after `RESET_AFTER_FAILS` (3) empty
   captures in a row, so it recovers unattended — no SSH/power-cycle needed.
+- **Remote-access MTU (this deployment).** The Pi is reached over a tunnel with a
+  **1280-byte MTU**, so with eth0 at the default 1500 large HTTP responses (the
+  full page, the "All"/history views, the map's 1500-row pull) stalled in a PMTU
+  black hole — small responses fine, big ones hung forever. Fix: eth0 MTU pinned
+  to **1200** via the NetworkManager profile ("Wired connection 1",
+  `802-3-ethernet.mtu 1200`). This is network-path specific, so it's **not** baked
+  into the imager. Symptom to recognise: `curl` gets a few KB then stalls while
+  localhost on the Pi serves the same response instantly.
 - Owner is **N9TPB / EN53hb** (see Mac memory `ham-radio-n9tpb`). PSKReporter
   spotting + portal logging are planned, not yet wired.
 
