@@ -63,11 +63,20 @@ a{color:var(--acc)}
   <span class="pill" id="pMode">idle</span>
   <span class="pill" id="pWifi">wifi ?</span>
   <span class="pill" id="pRev" title="installed revision"></span>
+  <span class="pill" id="clock" style="margin-left:auto;font-variant-numeric:tabular-nums"></span>
 </header>
 
 <main class="hide" id="app">
   <div class="card">
     <h2>Decode</h2>
+    <div id="cycleWrap" style="margin:0 0 14px">
+      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+        <span id="cycleLabel" class="mut">—</span><span id="cycleCount" class="mut"></span>
+      </div>
+      <div style="height:18px;background:#0d1117;border:1px solid var(--line);border-radius:9px;overflow:hidden">
+        <div id="cycleFill" style="height:100%;width:0%;background:#30363d;transition:width .15s linear,background .3s"></div>
+      </div>
+    </div>
     <div class="row" style="margin-bottom:12px">
       <button class="mode" data-mode="ft8" onclick="pickMode('ft8')">FT8</button>
       <button class="mode" data-mode="wspr" onclick="pickMode('wspr')">WSPR</button>
@@ -391,6 +400,27 @@ function renderMap(){
   }).catch(()=>{});
 }
 
+// ---- clock (UTC + local) + FT8 cycle heartbeat ----
+function tickClock(){
+  const d=new Date(), el=document.getElementById("clock");
+  if(el) el.textContent="UTC "+d.toISOString().substr(11,8)+" · Local "+d.toLocaleTimeString([], {hour12:false});
+}
+function tickCycle(){
+  const s=STATUS.sdr||{}, fill=document.getElementById("cycleFill");
+  if(!fill) return;
+  const lab=document.getElementById("cycleLabel"), cnt=document.getElementById("cycleCount");
+  if(!(s.running && (s.mode==="ft8"||s.mode==="wspr"))){
+    fill.style.width="0%"; fill.style.background="#30363d";
+    lab.textContent = s.running ? ((s.mode||"").toUpperCase()+" running") : "Idle — not listening";
+    cnt.textContent=""; return;
+  }
+  const period=s.mode==="wspr"?120:15, now=Date.now()/1000, pos=now%period, even=Math.floor(now/period)%2===0;
+  fill.style.width=((pos/period)*100).toFixed(1)+"%";
+  fill.style.background=even?"var(--ok)":"var(--bad)";
+  lab.textContent=(even?"🟢 even":"🔴 odd")+" · capturing "+(s.band||"")+" "+(s.mode||"").toUpperCase();
+  cnt.textContent=Math.ceil(period-pos)+"s to next · "+(s.decodes||0)+" decoded";
+}
+
 function setPill(id, good, text, neutral){
   const el=document.getElementById(id); el.textContent=text;
   el.classList.remove("on","off"); if(neutral) return;
@@ -403,8 +433,11 @@ function boot(){
   loadConfig(); refresh();
   clearInterval(window._t1); clearInterval(window._t2);
   loadHistory();
+  tickClock(); tickCycle();
+  clearInterval(window._t3);
   window._t1=setInterval(refresh,2500);
   window._t2=setInterval(()=>{renderMap();loadHistory();},20000);
+  window._t3=setInterval(()=>{tickClock();tickCycle();},200);
 }
 // Enter key submits the login form
 document.getElementById("pw").addEventListener("keydown",e=>{if(e.key==="Enter")login();});
