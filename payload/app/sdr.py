@@ -9,6 +9,7 @@ Decodes are kept in memory for the page and appended to a jsonl log on disk.
 
 import collections
 import json
+import math
 import os
 import sqlite3
 import subprocess
@@ -125,6 +126,76 @@ def db_query(window=0, limit=500):
     conn.close()
     cols = ["when", "mode", "band", "snr", "dt", "freq_hz", "message", "grid", "caller", "ts"]
     return {"decodes": [dict(zip(cols, r)) for r in rows], "count": count, "stations": stations}
+
+
+def grid_to_latlon(grid):
+    """Maidenhead grid (4 or 6 char) -> (lat, lon) at the square/subsquare centre."""
+    g = (grid or "").upper()
+    if len(g) < 4 or not ("A" <= g[0] <= "R") or not ("A" <= g[1] <= "R"):
+        return None
+    try:
+        lon = (ord(g[0]) - 65) * 20 - 180 + int(g[2]) * 2
+        lat = (ord(g[1]) - 65) * 10 - 90 + int(g[3])
+    except ValueError:
+        return None
+    if len(g) >= 6 and "A" <= g[4] <= "X" and "A" <= g[5] <= "X":
+        lon += (ord(g[4]) - 65) * (5 / 60) + 2.5 / 60
+        lat += (ord(g[5]) - 65) * (2.5 / 60) + 1.25 / 60
+    else:
+        lon += 1.0
+        lat += 0.5
+    return (lat, lon)
+
+
+def haversine_km(a, b):
+    """Great-circle distance in km between two (lat, lon) points."""
+    r = 6371.0
+    lat1, lon1, lat2, lon2 = (math.radians(x) for x in (a[0], a[1], b[0], b[1]))
+    dlat, dlon = lat2 - lat1, lon2 - lon1
+    h = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+    return 2 * r * math.asin(min(1.0, math.sqrt(h)))
+
+
+def db_records(mygrid=None):
+    """Furthest stations heard (all-time + today) by great-circle distance from the QTH."""
+    cfg = load_config()
+    home_grid = mygrid or cfg.get("mygrid") or "EN53hb"
+    home = grid_to_latlon(home_grid)
+    out = {"home": home_grid, "ever": None, "today": None, "top": [], "grids": 0}
+    if not home:
+        return out
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        rows = conn.execute(
+            "SELECT caller,grid,ts,utc,band,snr FROM decodes WHERE grid<>'' AND caller<>''"
+        ).fetchall()
+        conn.close()
+    except sqlite3.Error:
+        return out
+    lt = time.localtime()
+    day0 = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1))
+    best = {}                      # caller -> (km, record) keep the furthest per station
+    grids = set()
+    ever = today = None
+    ever_km = today_km = -1.0
+    for caller, grid, ts, utc, band, snr in rows:
+        ll = grid_to_latlon(grid)
+        if not ll:
+            continue
+        grids.add(grid[:6].upper())
+        km = haversine_km(home, ll)
+        rec = {"caller": caller, "grid": grid, "km": round(km), "mi": round(km * 0.621371),
+               "band": band, "snr": snr, "utc": utc, "ts": ts}
+        if caller not in best or km > best[caller][0]:
+            best[caller] = (km, rec)
+        if km > ever_km:
+            ever_km, ever = km, rec
+        if ts >= day0 and km > today_km:
+            today_km, today = km, rec
+    out["ever"], out["today"] = ever, today
+    out["top"] = [r for _, r in sorted(best.values(), key=lambda kr: kr[0], reverse=True)[:8]]
+    out["grids"] = len(grids)
+    return out
 
 
 def db_daily_stats(days=14):

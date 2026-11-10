@@ -105,6 +105,13 @@ a{color:var(--acc)}
     <div class="err" id="controlErr"></div>
   </div>
 
+  <div class="card" id="solarCard">
+    <h2>Space weather — band conditions</h2>
+    <div id="solarStats" class="stats"></div>
+    <div id="solarBands" style="margin-top:12px"></div>
+    <div class="note" id="solarNote"></div>
+  </div>
+
   <div class="card" id="liveCard">
     <h2>Live</h2>
     <div class="stats">
@@ -132,7 +139,7 @@ a{color:var(--acc)}
     </div>
     <div class="mut" id="histNote" style="margin-bottom:8px"></div>
     <div style="overflow:auto;max-height:210px">
-      <table id="histTbl"><thead><tr><th>UTC / Local</th><th>Mode</th><th>Band</th><th>SNR</th><th>Grid</th><th>Operator (via n9tpb.com)</th><th>Message</th></tr></thead><tbody></tbody></table>
+      <table id="histTbl"><thead><tr><th>UTC / Local</th><th>Mode</th><th>Band</th><th>SNR</th><th>Grid</th><th>Miles</th><th>Operator (via n9tpb.com)</th><th>Message</th></tr></thead><tbody></tbody></table>
     </div>
   </div>
 
@@ -140,6 +147,21 @@ a{color:var(--acc)}
     <h2>Map — who you're hearing</h2>
     <div id="map" style="height:380px;border-radius:8px;overflow:hidden;background:#0d1117"></div>
     <div class="note" id="mapNote">Stations appear here as their grid square comes through (not every decode carries one).</div>
+  </div>
+
+  <div class="card">
+    <h2>Distance &amp; DX records</h2>
+    <div id="dxStats" class="stats"></div>
+    <div style="overflow:auto;max-height:210px;margin-top:10px">
+      <table id="dxTbl"><thead><tr><th>#</th><th>Station</th><th>Grid</th><th>Miles</th><th>Band</th><th>SNR</th></tr></thead><tbody></tbody></table>
+    </div>
+    <div class="note" id="dxNote"></div>
+  </div>
+
+  <div class="card" id="adsbCard">
+    <h2>Aircraft — ADS-B (1090 MHz)</h2>
+    <div id="admap" style="height:360px;border-radius:8px;overflow:hidden;background:#0d1117"></div>
+    <div class="note" id="adNote">Start ADS-B mode to track aircraft overhead — one dongle, so this pauses FT8/WSPR.</div>
   </div>
 
   <div class="card">
@@ -284,6 +306,7 @@ function refresh(){
     document.querySelectorAll("button.mode").forEach(b=>{ b.disabled = !tools[b.dataset.mode]; });
     document.getElementById("startBtn").disabled = sdr.running;
     document.getElementById("stopBtn").disabled = !sdr.running;
+    loadAdsb(sdr.mode);
     // wifi summary
     const addrs = (wifi.addresses||[]).map(a=>a.iface+" "+a.cidr).join(", ");
     document.getElementById("wifiState").textContent =
@@ -336,7 +359,8 @@ function loadHistory(){
     rows.forEach(r=>{
       const tr=document.createElement("tr");
       const t=fmtTime(r.when,r.ts);
-      tr.innerHTML=`<td>${t}</td><td>${r.mode||""}</td><td>${r.band||""}</td><td>${r.snr}</td><td>${r.grid||""}</td><td class="op" data-call="${r.caller||""}">${esc(opText(r.caller))}</td><td class="msg">${esc(r.message||"")}</td>`;
+      const dm=r.grid?distMi(r.grid):null;
+      tr.innerHTML=`<td>${t}</td><td>${r.mode||""}</td><td>${r.band||""}</td><td>${r.snr}</td><td>${r.grid||""}</td><td>${dm!=null?dm.toLocaleString():""}</td><td class="op" data-call="${r.caller||""}">${esc(opText(r.caller))}</td><td class="msg">${esc(r.message||"")}</td>`;
       tb.appendChild(tr);
     });
     const shown=rows.length<(d.count||0)?" — newest "+rows.length+" shown":"";
@@ -456,6 +480,72 @@ function renderMap(){
   }).catch(()=>{});
 }
 
+// ---- space weather ----
+function condColor(c){c=(c||"").toLowerCase();return c.indexOf("good")>=0?"var(--ok)":c.indexOf("fair")>=0?"var(--warn)":(c.indexOf("poor")>=0||c.indexOf("closed")>=0)?"var(--bad)":"var(--mut)";}
+function loadSolar(){
+  api("/api/solar").then(d=>{
+    const note=document.getElementById("solarNote");
+    if(d.error){document.getElementById("solarStats").innerHTML="";note.textContent="Solar data unavailable: "+d.error;return;}
+    const S=(k,v,sub)=>`<div class="stat"><div class="mut" style="font-size:12px">${k}</div><div class="big" style="font-size:20px">${v||"—"}</div>${sub?`<div class="mut" style="font-size:11px">${sub}</div>`:""}</div>`;
+    document.getElementById("solarStats").innerHTML=
+      S("SFI",d.sfi,"solar flux")+S("Sunspots",d.sunspots)+S("A-index",d.aindex)+S("K-index",d.kindex)+S("X-ray",d.xray)+S("Aurora",d.aurora)+S("Sol. wind",d.solarwind,"km/s")+S("Geomag",d.geomag);
+    const order=["80m-40m","30m-20m","17m-15m","12m-10m"],by={};
+    (d.bands||[]).forEach(b=>{(by[b.name]=by[b.name]||{})[b.time]=b.cond;});
+    let h='<table style="width:auto"><thead><tr><th>Band</th><th>Day</th><th>Night</th></tr></thead><tbody>';
+    order.forEach(n=>{if(!by[n])return;const dc=by[n].day||"",nc=by[n].night||"",me=(n==="12m-10m");
+      h+=`<tr${me?' style="font-weight:700"':""}><td>${n}${me?" ◄ you":""}</td><td style="color:${condColor(dc)}">${dc||"—"}</td><td style="color:${condColor(nc)}">${nc||"—"}</td></tr>`;});
+    h+="</tbody></table>";
+    document.getElementById("solarBands").innerHTML=h;
+    note.textContent="Source: "+(d.source||"N0NBH")+" · updated"+(d.updated||"")+". You can only work 10m/12m here (no HF without an upconverter).";
+  }).catch(()=>{});
+}
+
+// ---- distance & DX records ----
+function haversineMi(a,b){const R=3958.8,r=x=>x*Math.PI/180,dlat=r(b[0]-a[0]),dlon=r(b[1]-a[1]);
+  const h=Math.sin(dlat/2)**2+Math.cos(r(a[0]))*Math.cos(r(b[0]))*Math.sin(dlon/2)**2;return 2*R*Math.asin(Math.min(1,Math.sqrt(h)));}
+function distMi(grid){const ll=gridToLatLon(grid),home=gridToLatLon(MYGRID);if(!ll||!home)return null;return Math.round(haversineMi(home,ll));}
+function loadRecords(){
+  api("/api/records").then(d=>{
+    const card=(lbl,r)=>`<div class="stat"><div class="mut" style="font-size:12px">${lbl}</div><div class="big" style="font-size:20px">${r?r.mi.toLocaleString()+" mi":"—"}</div><div class="mut" style="font-size:11px">${r?(r.caller+" · "+r.grid):"&nbsp;"}</div></div>`;
+    document.getElementById("dxStats").innerHTML=card("Furthest ever",d.ever)+card("Furthest today",d.today)+
+      `<div class="stat"><div class="mut" style="font-size:12px">Unique grids</div><div class="big" style="font-size:20px">${d.grids||0}</div></div>`;
+    const tb=document.querySelector("#dxTbl tbody");tb.innerHTML="";
+    (d.top||[]).forEach((r,i)=>{const tr=document.createElement("tr");
+      tr.innerHTML=`<td>${i+1}</td><td>${r.caller}</td><td>${r.grid}</td><td>${r.mi.toLocaleString()}</td><td>${r.band||""}</td><td>${r.snr!=null?r.snr:""}</td>`;tb.appendChild(tr);});
+    document.getElementById("dxNote").textContent=(d.top&&d.top.length)?("Great-circle miles from "+(d.home||"your QTH")+" to each station's grid square."):"Distances appear once stations send grid squares.";
+  }).catch(()=>{});
+}
+
+// ---- ADS-B aircraft map ----
+let ADMAP=null,ADLAYER=null;
+function initAdMap(){
+  if(ADMAP||!window.L||!document.getElementById("admap"))return;
+  const home=gridToLatLon(MYGRID)||[43,-89];
+  ADMAP=L.map('admap',{attributionControl:false,minZoom:3}).setView(home,7);
+  const esri="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/";
+  L.tileLayer(esri+"World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",{maxZoom:16}).addTo(ADMAP);
+  L.tileLayer(esri+"World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}",{maxZoom:16}).addTo(ADMAP);
+  ADLAYER=L.layerGroup().addTo(ADMAP);
+  setTimeout(()=>ADMAP.invalidateSize(),200);
+}
+function loadAdsb(mode){
+  const note=document.getElementById("adNote");
+  if(mode!=="adsb"){note.textContent="Start ADS-B mode to track aircraft overhead — one dongle, so this pauses FT8/WSPR.";return;}
+  initAdMap();if(!ADMAP)return;
+  api("/api/adsb").then(d=>{
+    ADLAYER.clearLayers();
+    const home=gridToLatLon(MYGRID)||[43,-89];
+    L.circleMarker(home,{radius:5,color:'#2f81f7',fillColor:'#2f81f7',fillOpacity:1,weight:2}).addTo(ADLAYER).bindTooltip("You — "+MYGRID);
+    (d.aircraft||[]).forEach(a=>{
+      if(a.lat==null||a.lon==null)return;
+      const ic=L.divIcon({className:"plane",html:`<div style="transform:rotate(${(a.track||0)-45}deg);font-size:15px;line-height:1;color:#3fb950">✈</div>`,iconSize:[16,16],iconAnchor:[8,8]});
+      L.marker([a.lat,a.lon],{icon:ic}).addTo(ADLAYER)
+        .bindTooltip((a.flight||a.hex||"?")+" · "+(a.alt!=null?a.alt+" ft":"?")+(a.speed!=null?" · "+Math.round(a.speed)+" kt":""));
+    });
+    note.textContent=(d.error?"dump1090 warming up… ":"")+(d.count||0)+" aircraft, "+(d.with_position||0)+" with position.";
+  }).catch(()=>{});
+}
+
 // ---- clock (UTC + local) + FT8 cycle heartbeat ----
 function tickClock(){
   const d=new Date(), el=document.getElementById("clock");
@@ -498,13 +588,14 @@ function fmtTime(when, ts){
 function boot(){
   api("/api/bands").then(d=>{BANDS=d.bands||[];pickMode("ft8");}).catch(()=>{});
   loadConfig(); refresh();
-  clearInterval(window._t1); clearInterval(window._t2);
-  loadHistory(); loadStats();
+  clearInterval(window._t1); clearInterval(window._t2); clearInterval(window._t4);
+  loadHistory(); loadStats(); loadSolar(); loadRecords();
   tickClock(); tickCycle();
   clearInterval(window._t3);
   window._t1=setInterval(refresh,2500);
-  window._t2=setInterval(()=>{renderMap();loadHistory();loadStats();},20000);
+  window._t2=setInterval(()=>{renderMap();loadHistory();loadStats();loadRecords();},20000);
   window._t3=setInterval(()=>{tickClock();tickCycle();},200);
+  window._t4=setInterval(loadSolar,300000);
 }
 // Enter key submits the login form
 document.getElementById("pw").addEventListener("keydown",e=>{if(e.key==="Enter")login();});

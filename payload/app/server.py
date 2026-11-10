@@ -10,14 +10,16 @@ import json
 import os
 import subprocess
 import threading
+import time
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
 import bands
 import decoders
-from sdr import Controller, load_config, save_config, db_query, db_daily_stats
+from sdr import Controller, load_config, save_config, db_query, db_daily_stats, db_records
 from update import REPO, UpdateError, apply_update, check_update, read_revision
 from wifi import AP_ADDRESS, bringup, load_networks, save_networks, scan_wifi, wifi_state
 
@@ -117,6 +119,10 @@ class Handler(BaseHTTPRequestHandler):
             query = parse_qs(urlparse(self.path).query)
             days = _int((query.get("days") or ["14"])[0], 14)
             self._send(200, db_daily_stats(max(1, min(days, 90))))
+        elif path == "/api/solar":
+            self._send(200, solar_data())
+        elif path == "/api/records":
+            self._send(200, db_records())
         elif path == "/api/counts":
             self._send(200, SDR.counts())
         elif path == "/api/adsb":
@@ -269,6 +275,49 @@ def password_from_cookie(header):
         if sep and name == "rtlsdr-password":
             return unquote(value)
     return ""
+
+
+SOLAR_URL = "https://www.hamqsl.com/solarxml.php"
+_SOLAR = {"ts": 0.0, "data": None}
+
+
+def solar_data():
+    """Space-weather + HF band conditions from N0NBH's hamQSL feed, cached 15 min."""
+    now = time.time()
+    if _SOLAR["data"] and now - _SOLAR["ts"] < 900:
+        return _SOLAR["data"]
+    try:
+        req = urllib.request.Request(SOLAR_URL, headers={"User-Agent": "rtlsdr-pi"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            root = ET.fromstring(resp.read())
+        sd = root.find("solardata")
+        if sd is None:
+            raise ValueError("no solardata in feed")
+
+        def t(tag):
+            el = sd.find(tag)
+            return (el.text or "").strip() if el is not None and el.text else ""
+
+        conds = []
+        cc = sd.find("calculatedconditions")
+        if cc is not None:
+            for b in cc.findall("band"):
+                conds.append({"name": b.get("name"), "time": b.get("time"),
+                              "cond": (b.text or "").strip()})
+        data = {
+            "updated": t("updated"), "source": sd.findtext("source", "N0NBH").strip(),
+            "sfi": t("solarflux"), "sunspots": t("sunspots"),
+            "aindex": t("aindex"), "kindex": t("kindex"), "xray": t("xray"),
+            "aurora": t("aurora"), "solarwind": t("solarwind"),
+            "geomag": t("geomagfield"), "signalnoise": t("signalnoise"),
+            "muf": t("muf"), "bands": conds,
+        }
+        _SOLAR["ts"], _SOLAR["data"] = now, data
+        return data
+    except Exception as exc:  # noqa: BLE901 - keep serving the last good copy
+        if _SOLAR["data"]:
+            return _SOLAR["data"]
+        return {"error": str(exc), "bands": []}
 
 
 _CALL_CACHE = {}
