@@ -105,7 +105,7 @@ a{color:var(--acc)}
       <div class="stat"><div class="big" id="cAir">—</div><div class="mut">aircraft</div></div>
     </div>
     <div id="decodeWrap" style="margin-top:14px;overflow:auto">
-      <table id="decodeTbl"><thead><tr><th>UTC</th><th>SNR</th><th>DT</th><th>Hz</th><th>Message</th></tr></thead><tbody></tbody></table>
+      <table id="decodeTbl"><thead><tr><th>UTC / Local</th><th>SNR</th><th>DT</th><th>Hz</th><th>Message</th></tr></thead><tbody></tbody></table>
     </div>
     <div class="note" id="liveNote"></div>
   </div>
@@ -123,7 +123,7 @@ a{color:var(--acc)}
     </div>
     <div class="mut" id="histNote" style="margin-bottom:8px"></div>
     <div style="overflow:auto;max-height:460px">
-      <table id="histTbl"><thead><tr><th>Time</th><th>Mode</th><th>Band</th><th>SNR</th><th>Grid</th><th>Operator (via n9tpb.com)</th><th>Message</th></tr></thead><tbody></tbody></table>
+      <table id="histTbl"><thead><tr><th>UTC / Local</th><th>Mode</th><th>Band</th><th>SNR</th><th>Grid</th><th>Operator (via n9tpb.com)</th><th>Message</th></tr></thead><tbody></tbody></table>
     </div>
   </div>
 
@@ -270,7 +270,7 @@ function loadDecodes(){
     (d.decodes||[]).forEach(r=>{
       const tr = document.createElement("tr");
       const hz = r.audio_hz!==undefined ? r.audio_hz : (r.freq_mhz||"");
-      tr.innerHTML = `<td>${r.when||""}</td><td>${r.snr}</td><td>${(r.dt||0).toFixed(1)}</td><td>${hz}</td><td class="msg">${esc(r.message||"")}</td>`;
+      tr.innerHTML = `<td>${fmtTime(r.when,r.ts)}</td><td>${r.snr}</td><td>${(r.dt||0).toFixed(1)}</td><td>${hz}</td><td class="msg">${esc(r.message||"")}</td>`;
       tb.appendChild(tr);
     });
     document.getElementById("liveNote").textContent = (d.decodes&&d.decodes.length)?"":"No decodes yet. On FT8/WSPR the first ones arrive after a full cycle.";
@@ -303,7 +303,7 @@ function loadHistory(){
     const rows=d.decodes||[], tb=document.querySelector("#histTbl tbody"); tb.innerHTML="";
     rows.forEach(r=>{
       const tr=document.createElement("tr");
-      const t=r.ts?new Date(r.ts*1000).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit",second:"2-digit"}):(r.when||"");
+      const t=fmtTime(r.when,r.ts);
       tr.innerHTML=`<td>${t}</td><td>${r.mode||""}</td><td>${r.band||""}</td><td>${r.snr}</td><td>${r.grid||""}</td><td class="op" data-call="${r.caller||""}">${esc(opText(r.caller))}</td><td class="msg">${esc(r.message||"")}</td>`;
       tb.appendChild(tr);
     });
@@ -429,6 +429,17 @@ function setPill(id, good, text, neutral){
   el.classList.add(good?"on":"off");
 }
 function esc(s){return (s+"").replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+function _p2(n){return String(n).padStart(2,"0");}
+function fmtTime(when, ts){
+  let d;
+  if(ts){ d=new Date(ts*1000); }
+  else if(when && (""+when).length>=6){ const w=""+when, n=new Date();
+    d=new Date(Date.UTC(n.getUTCFullYear(),n.getUTCMonth(),n.getUTCDate(),+w.substr(0,2),+w.substr(2,2),+w.substr(4,2))); }
+  else return when||"";
+  const utc=_p2(d.getUTCHours())+":"+_p2(d.getUTCMinutes())+":"+_p2(d.getUTCSeconds());
+  const loc=d.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false});
+  return utc+"Z / "+loc;
+}
 
 function boot(){
   api("/api/bands").then(d=>{BANDS=d.bands||[];pickMode("ft8");}).catch(()=>{});
