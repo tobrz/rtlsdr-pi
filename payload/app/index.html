@@ -31,7 +31,7 @@ select,input{font:inherit;background:#0d1117;color:var(--fg);border:1px solid va
 label{font-size:13px;color:var(--mut);display:block;margin-bottom:4px}
 table{width:100%;border-collapse:collapse;font-size:13px}
 th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
-th{color:var(--mut);font-weight:600}
+th{color:var(--mut);font-weight:600;position:sticky;top:0;background:var(--card)}
 td.msg{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;white-space:normal}
 .mut{color:var(--mut)}
 .big{font-size:26px;font-weight:700}
@@ -113,7 +113,7 @@ a{color:var(--acc)}
       <div class="stat"><div class="big" id="cCycles">0</div><div class="mut">cycles</div></div>
       <div class="stat"><div class="big" id="cAir">—</div><div class="mut">aircraft</div></div>
     </div>
-    <div id="decodeWrap" style="margin-top:14px;overflow:auto">
+    <div id="decodeWrap" style="margin-top:14px;overflow:auto;max-height:210px">
       <table id="decodeTbl"><thead><tr><th>UTC / Local</th><th>SNR</th><th>DT</th><th>Hz</th><th>Message</th></tr></thead><tbody></tbody></table>
     </div>
     <div class="note" id="liveNote"></div>
@@ -131,7 +131,7 @@ a{color:var(--acc)}
       <button onclick="loadHistory()">↻</button>
     </div>
     <div class="mut" id="histNote" style="margin-bottom:8px"></div>
-    <div style="overflow:auto;max-height:460px">
+    <div style="overflow:auto;max-height:210px">
       <table id="histTbl"><thead><tr><th>UTC / Local</th><th>Mode</th><th>Band</th><th>SNR</th><th>Grid</th><th>Operator (via n9tpb.com)</th><th>Message</th></tr></thead><tbody></tbody></table>
     </div>
   </div>
