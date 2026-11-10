@@ -374,7 +374,9 @@ function initMap(){
   if(MAP || !window.L || !document.getElementById("map")) return;
   const home=gridToLatLon(MYGRID)||[43,-89];
   MAP=L.map('map',{attributionControl:false,worldCopyJump:true,minZoom:1}).setView(home,3);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',{maxZoom:8}).addTo(MAP);
+  const esri="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/";
+  L.tileLayer(esri+"World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",{maxZoom:16}).addTo(MAP);
+  L.tileLayer(esri+"World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}",{maxZoom:16}).addTo(MAP);
   MAPLAYER=L.layerGroup().addTo(MAP);
   setTimeout(()=>MAP.invalidateSize(),200);
 }
