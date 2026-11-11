@@ -38,17 +38,19 @@ def _pad4(b):
 
 def _rx_template():
     # Options template (set id 3): receiverCallsign(2) [scope], receiverLocator(4), decoderSoftware(8)
-    body = struct.pack(">HHH", RX_TID, 3, 1) + _efield(2, 0xFFFF) + _efield(4, 0xFFFF) + _efield(8, 0xFFFF)
+    # Pad the set to a 4-byte boundary (IPFIX sets must align; pskreporter's own
+    # example template is padded to 36 bytes — an unpadded set misparses).
+    body = _pad4(struct.pack(">HHH", RX_TID, 3, 1) + _efield(2, 0xFFFF) + _efield(4, 0xFFFF) + _efield(8, 0xFFFF))
     return struct.pack(">HH", 3, 4 + len(body)) + body
 
 
 def _tx_template():
     # Template (set id 2): senderCallsign(1), frequency(5,4), sNR(6,1), senderLocator(3),
     # mode(10), informationSource(11,1), flowStartSeconds(150,4)
-    body = (struct.pack(">HH", TX_TID, 7)
-            + _efield(1, 0xFFFF) + _efield(5, 4) + _efield(6, 1)
-            + _efield(3, 0xFFFF) + _efield(10, 0xFFFF) + _efield(11, 1)
-            + _sfield(150, 4))
+    body = _pad4(struct.pack(">HH", TX_TID, 7)
+                 + _efield(1, 0xFFFF) + _efield(5, 4) + _efield(6, 1)
+                 + _efield(3, 0xFFFF) + _efield(10, 0xFFFF) + _efield(11, 1)
+                 + _sfield(150, 4))
     return struct.pack(">HH", 2, 4 + len(body)) + body
 
 
@@ -78,20 +80,25 @@ class Reporter:
         self.software = software
         self.seq = 0
         self.ident = random.getrandbits(32)
-        self.templates_sent = 0
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     def send(self, spots):
-        """spots: list of (callsign, freq_hz, snr, grid, mode, unix_ts). Returns bytes sent."""
-        if not spots:
-            return 0
-        self.seq += 1
-        payload = b""
-        if self.templates_sent < 3 or self.seq % 20 == 0:   # templates in first 3, then hourly-ish
-            payload += _rx_template() + _tx_template()
-            self.templates_sent += 1
-        payload += _rx_dataset(self.call, self.locator, self.software)
-        payload += _tx_dataset(spots[:300])
-        msg = struct.pack(">HHIII", 0x000A, 16 + len(payload), int(time.time()), self.seq, self.ident) + payload
-        self.sock.sendto(msg, (HOST, PORT))
-        return len(msg)
+        """spots: list of (callsign, freq_hz, snr, grid, mode, unix_ts). Returns bytes sent.
+
+        Templates go in EVERY datagram: pskreporter expires cached templates after a
+        quiet spell (e.g. a band closed overnight), and a data-only packet it can't
+        decode is silently dropped. Spots are chunked so each datagram stays small
+        enough to never fragment (well under a 1200-byte path MTU).
+        """
+        total = 0
+        chunk = 25
+        for i in range(0, len(spots), chunk):
+            batch = spots[i:i + chunk]
+            self.seq += 1
+            payload = (_rx_template() + _tx_template()
+                       + _rx_dataset(self.call, self.locator, self.software)
+                       + _tx_dataset(batch))
+            msg = struct.pack(">HHIII", 0x000A, 16 + len(payload), int(time.time()), self.seq, self.ident) + payload
+            self.sock.sendto(msg, (HOST, PORT))
+            total += len(msg)
+        return total
