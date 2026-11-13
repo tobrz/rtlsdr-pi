@@ -25,7 +25,12 @@ CONFIG_PATH = os.path.join(DATA, "config.json")
 LOG_PATH = os.path.join(DATA, "decodes.jsonl")
 DB_PATH = os.path.join(DATA, "decodes.db")
 ADSB_DIR = os.path.join(DATA, "adsb")
+APRS_DIR = os.path.join(DATA, "aprs")          # direwolf CSV logs land here
+APRS_CONF = os.path.join(DATA, "direwolf.conf")
 WORK = os.path.join(DATA, "work")
+
+APRS_FREQ_MHZ = 144.390   # North American 2 m APRS channel
+APRS_RATE = 24000         # rtl_fm output / direwolf input sample rate
 
 FT8_PERIOD = 15
 WSPR_PERIOD = 120
@@ -147,6 +152,29 @@ def grid_to_latlon(grid):
     return (lat, lon)
 
 
+def latlon_to_grid(lat, lon, precision=6):
+    """Decimal lat/lon -> Maidenhead grid (uppercase, 6 char), '' if invalid.
+
+    The inverse of grid_to_latlon; lets APRS positions (which arrive as lat/lon)
+    share the grid-based map, records, and distance logic with FT8/WSPR.
+    """
+    try:
+        lat = float(lat)
+        lon = float(lon)
+    except (TypeError, ValueError):
+        return ""
+    if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
+        return ""
+    lon += 180.0
+    lat += 90.0
+    A = ord("A")
+    g = chr(A + int(lon // 20)) + chr(A + int(lat // 10))
+    g += str(int((lon % 20) // 2)) + str(int(lat % 10))
+    if precision >= 6:
+        g += chr(A + int((lon % 2) * 12)) + chr(A + int((lat % 1) * 24))
+    return g
+
+
 def haversine_km(a, b):
     """Great-circle distance in km between two (lat, lon) points."""
     r = 6371.0
@@ -229,13 +257,15 @@ class Controller:
         init_db()
         migrate_jsonl()
         self._lock = threading.Lock()
-        self._mode = "idle"            # idle | ft8 | wspr | adsb
+        self._mode = "idle"            # idle | ft8 | wspr | adsb | livesdr | aprs
         self._band = ""
         self._since = 0.0
         self._last = ""                # human note about the last cycle
         self._stop = threading.Event()
         self._thread = None
         self._adsb = None              # Popen for dump1090-fa
+        self._aprs = None              # Popen for the rtl_fm | direwolf pipeline
+        self._aprs_note = ""           # iGate summary (callsign / server)
         self._recent = collections.deque(maxlen=400)
         self._calls = set()
         self._cycles = 0
@@ -250,8 +280,8 @@ class Controller:
 
     def start(self, mode, band=""):
         mode = (mode or "").lower()
-        if mode not in ("ft8", "wspr", "adsb", "livesdr"):
-            raise ValueError("Pick FT8, WSPR, ADS-B, or Live SDR.")
+        if mode not in ("ft8", "wspr", "adsb", "livesdr", "aprs"):
+            raise ValueError("Pick FT8, WSPR, ADS-B, Live SDR, or APRS.")
         if mode in ("ft8", "wspr"):
             if not bands.is_valid(band, mode):
                 raise ValueError("Unknown band for that mode.")
@@ -264,6 +294,9 @@ class Controller:
         elif mode == "livesdr":
             if not decoders.tool_status().get("livesdr"):
                 raise ValueError("OpenWebRX/Docker is not installed yet. Let first-boot setup finish.")
+        elif mode == "aprs":
+            if not decoders.tool_status().get("aprs"):
+                raise ValueError("APRS needs rtl_fm + direwolf. Let first-boot setup finish, or install direwolf.")
         self.stop()
         with self._lock:
             self._mode = mode
@@ -278,6 +311,8 @@ class Controller:
                 self._start_adsb()
             elif mode == "livesdr":
                 self._start_livesdr()
+            elif mode == "aprs":
+                self._start_aprs()
             else:
                 self._thread = threading.Thread(target=self._loop, args=(mode, band), daemon=True)
                 self._thread.start()
@@ -296,6 +331,7 @@ class Controller:
             thread.join(timeout=FT8_CAPTURE + 20)
         self._thread = None
         self._stop_adsb()
+        self._stop_aprs()
         if was == "livesdr":
             self._stop_livesdr()
         with self._lock:
@@ -322,6 +358,7 @@ class Controller:
                 "spotted": self._spotted,
                 "pending": len(self._pending),
                 "adsb": adsb,
+                "aprs": self._aprs_note if self._mode == "aprs" else "",
             }
 
     def recent(self, limit=200):
@@ -393,7 +430,9 @@ class Controller:
                 for call in callers:
                     self._calls.add(call)
                 sender = callers[-1] if callers else ""   # the station that transmitted
-                if sender:
+                # Only weak-signal digital modes feed PSKReporter; APRS does its
+                # own reporting to APRS-IS (via direwolf), so keep it out of here.
+                if sender and row.get("mode") in ("FT8", "WSPR"):
                     self._pending[sender] = (sender, row.get("freq_hz") or 0, row.get("snr") or 0,
                                              row.get("grid") or "", row.get("mode") or "FT8", now)
         self._append_log(rows)
@@ -500,6 +539,117 @@ class Controller:
 
     def _stop_livesdr(self):
         subprocess.run(["docker", "stop", "openwebrx"], capture_output=True, text=True, timeout=30)
+
+    # ---- APRS (receive-only iGate: rtl_fm | direwolf -> APRS-IS + local log) ----
+
+    def _start_aprs(self):
+        cfg = load_config()
+        mycall = (cfg.get("mycall") or "").strip().upper()
+        if not mycall:
+            self._mode = "idle"
+            raise ValueError("Set your callsign in Radio settings first — APRS-IS needs it.")
+        home = grid_to_latlon(cfg.get("mygrid") or "")
+        lat, lon = (home if home else (None, None))
+        os.makedirs(APRS_DIR, exist_ok=True)
+        with open(APRS_CONF, "w") as handle:
+            handle.write(decoders.direwolf_conf(mycall, lat=lat, lon=lon, logdir=APRS_DIR))
+        freq_hz = int(round(APRS_FREQ_MHZ * 1_000_000))
+        gain = float(cfg.get("gain", 40.0))
+        ppm = int(cfg.get("ppm", 0))
+        # rtl_fm -M fm demodulates the 2 m FM channel; direwolf reads the 24 kHz
+        # mono stream on stdin ('-'), decodes AX.25, and igates to APRS-IS.
+        cmd = (
+            f"rtl_fm -f {freq_hz} -M fm -s {APRS_RATE} -g {gain} -p {ppm} -l 0 - 2>/dev/null "
+            f"| direwolf -c {APRS_CONF} -r {APRS_RATE} -D 1 -t 0 - "
+            f">{os.path.join(APRS_DIR, 'direwolf.out')} 2>&1"
+        )
+        try:
+            # New session so we can kill the whole pipeline (rtl_fm + direwolf).
+            self._aprs = subprocess.Popen(["bash", "-c", cmd], start_new_session=True)
+        except OSError as exc:
+            self._aprs = None
+            self._mode = "idle"
+            raise ValueError(f"Could not start the APRS iGate: {exc}")
+        self._aprs_note = f"iGate {mycall} → noam.aprs2.net (RX-only) on {APRS_FREQ_MHZ:.3f} MHz"
+        self._note(self._aprs_note)
+        self._thread = threading.Thread(target=self._aprs_loop, daemon=True)
+        self._thread.start()
+
+    def _stop_aprs(self):
+        proc = self._aprs
+        self._aprs = None
+        if proc and proc.poll() is None:
+            import signal
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                proc.wait(timeout=8)
+            except (ProcessLookupError, PermissionError):
+                pass
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+
+    def _aprs_loop(self):
+        """Tail direwolf's daily CSV log and ingest each heard station."""
+        import csv as _csv
+        cur_path, offset, header = None, 0, None
+        while not self._stop.is_set():
+            path = os.path.join(APRS_DIR, time.strftime("%Y-%m-%d.log"))
+            if path != cur_path:
+                cur_path, offset, header = path, 0, None
+            rows = []
+            try:
+                if os.path.exists(path):
+                    with open(path, "r", newline="") as handle:
+                        handle.seek(offset)
+                        chunk = handle.read()
+                        offset = handle.tell()
+                    for line in chunk.splitlines():
+                        if not line.strip():
+                            continue
+                        if line.startswith("chan,"):
+                            header = next(_csv.reader([line]))
+                            continue
+                        cols = header or decoders.DIREWOLF_COLS
+                        rec = dict(zip(cols, next(_csv.reader([line]))))
+                        row = self._aprs_row(rec)
+                        if row:
+                            rows.append(row)
+            except (OSError, StopIteration, ValueError, _csv.Error):
+                pass
+            if rows:
+                self._ingest(rows, "2m")
+                self._note(f"{len(rows)} APRS packet(s) · {time.strftime('%H%M%S', time.gmtime())} UTC")
+            self._stop.wait(2.0)
+
+    def _aprs_row(self, rec):
+        source = (rec.get("source") or "").strip().upper()
+        if not source:
+            return None
+        base = source.split("-")[0]
+        lat, lon = rec.get("latitude") or "", rec.get("longitude") or ""
+        grid = latlon_to_grid(lat, lon) if (lat and lon) else ""
+        comment = (rec.get("comment") or "").strip()
+        level = (rec.get("level") or "").strip()
+        try:
+            snr = int(float(level.split("(")[0])) if level else None
+        except ValueError:
+            snr = None
+        iso = rec.get("isotime") or ""
+        when = iso.split("T")[1].replace(":", "")[:6] if "T" in iso else ""
+        message = source + ((" " + comment) if comment else "")
+        return {
+            "mode": "APRS",
+            "snr": snr,
+            "dt": None,
+            "freq_hz": int(round(APRS_FREQ_MHZ * 1_000_000)),
+            "message": message[:160],
+            "callers": [base] if base else [],
+            "grid": grid,
+            "when": when,
+        }
 
     def _adsb_snapshot(self):
         path = os.path.join(ADSB_DIR, "aircraft.json")

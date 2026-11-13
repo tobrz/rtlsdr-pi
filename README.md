@@ -1,8 +1,9 @@
 # RTL-SDR on a Raspberry Pi
 
 Headless SDR appliance for an RTL-SDR dongle on a Raspberry Pi 4. Decodes
-**FT8** and **WSPR** on a band you pick, runs **ADS-B** (FlightAware), or opens a
-**Live SDR** view — an OpenWebRX waterfall + audio right in your browser. The Pi
+**FT8** and **WSPR** on a band you pick, runs **ADS-B** (FlightAware), monitors
+**APRS** on 2 m as a receive-only iGate, or opens a **Live SDR** view — an
+OpenWebRX waterfall + audio right in your browser. The Pi
 joins a known Wi-Fi network when one is in range; otherwise it becomes the access
 point `RTLSDR` at `192.168.50.1` and hands your phone or laptop an address.
 Setup and every later change happen on a web page — no keyboard, mouse, or HDMI
@@ -18,10 +19,22 @@ Factory password for the web page, SSH, and the standalone Wi-Fi network:
 ## One dongle = one job at a time
 
 An RTL-SDR can only tune one frequency through one antenna at once. So the
-console runs **exactly one** activity — starting FT8, WSPR, or ADS-B stops
+console runs **exactly one** activity — starting FT8, WSPR, ADS-B, or APRS stops
 whatever was running. ADS-B (1090 MHz) also needs its own small antenna; your
 HF antenna won't hear aircraft. A second dongle + 1090 antenna would let ADS-B
 run alongside the HF modes, but that is not this build.
+
+## APRS iGate (receive-only)
+
+Pick **APRS** and the console tunes **144.390 MHz** (the North-American 2 m APRS
+channel) and runs [direwolf](https://github.com/wb2osz/direwolf) as a
+**receive-only iGate**: it decodes the 1200-baud packets, uploads every heard
+station to the **APRS-IS** network (so they appear on [aprs.fi](https://aprs.fi)),
+and logs them locally with the other decodes — positions land on the same map.
+It needs a **2 m antenna** (the kit telescopic set to ~19″ hears local traffic; an
+HF wire won't). It **never transmits** — no PTT is configured, so it only listens
+and feeds the internet. Your APRS-IS login is derived from your callsign
+automatically; set your callsign in Radio settings first.
 
 ## Live SDR (OpenWebRX)
 

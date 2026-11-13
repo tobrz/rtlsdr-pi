@@ -29,6 +29,18 @@ Raspberry Pi OS is left as imaged; updates only touch `/opt/rtlsdr-pi` and the u
 - **Decoders:** FT8/WSPR = `rtl_fm | sox` → wav → `jt9 -8` / `wsprd`
   (from the `wsjtx` apt package). ADS-B = `dump1090-fa` (FlightAware repo,
   best-effort install), read via `adsb/aircraft.json`.
+- **APRS (`aprs` mode):** receive-only iGate on **144.390 MHz** (2 m FM, 1200-baud
+  AFSK). Pipeline `rtl_fm -M fm -s 24000 | direwolf -c direwolf.conf -r 24000 -D 1 -`.
+  direwolf **igates to APRS-IS itself** (`IGSERVER noam.aprs2.net` / `IGLOGIN`),
+  so "reports to the internet" is direwolf, not us; we just **tail its CSV log**
+  (`/var/lib/rtlsdr-pi/aprs/YYYY-MM-DD.log`) in `Controller._aprs_loop`, convert
+  each lat/lon to a Maidenhead grid (`sdr.latlon_to_grid`, so APRS stations reuse
+  the FT8 map/records) and log them to the same `decodes.db` with `mode='APRS'`,
+  `band='2m'`. Conf is written to `/var/lib/rtlsdr-pi/direwolf.conf` at start from
+  `decoders.direwolf_conf()`. **RX-only by construction:** no `ADEVICE`/PTT and no
+  `IGTXVIA`, so it cannot key a transmitter; the `PBEACON sendto=IG` is internet-only.
+  APRS-IS passcode is the public callpass of `mycall` (`decoders.aprs_passcode`),
+  derived not stored. APRS feeds **not** sent to PSKReporter (that's FT8/WSPR only).
 - **Live SDR:** OpenWebRX in Docker (image `jketterl/openwebrx`, container `openwebrx`, port 8073). `sdr.Controller` mode `livesdr` runs `docker start/stop openwebrx`; exclusive with decoding (one dongle). Provisioned in bootstrap.sh (docker.io + image pull + `docker create` of a stopped container). SDR profiles are configured in OpenWebRX's own web Settings.
 - The DVB-T kernel module is blacklisted in `bootstrap.sh` so rtl-sdr can open the dongle.
 

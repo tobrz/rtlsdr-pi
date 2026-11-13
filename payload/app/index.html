@@ -94,9 +94,10 @@ a{color:var(--acc)}
       <button class="mode" data-mode="wspr" onclick="pickMode('wspr')">WSPR</button>
       <button class="mode" data-mode="adsb" onclick="pickMode('adsb')">ADS-B (1090)</button>
       <button class="mode" data-mode="livesdr" onclick="pickMode('livesdr')">Live SDR</button>
+      <button class="mode" data-mode="aprs" onclick="pickMode('aprs')">APRS (144.39)</button>
     </div>
-    <div class="row" id="bandRow">
-      <div><label for="band">Band</label><select id="band"></select></div>
+    <div class="row">
+      <div id="bandRow"><label for="band">Band</label><select id="band"></select></div>
       <div style="align-self:flex-end"><button class="primary" id="startBtn" onclick="start()">Start</button>
       <button class="stop" id="stopBtn" onclick="stop()">Stop</button></div>
     </div>
@@ -263,7 +264,7 @@ function login(){
 function pickMode(m){
   MODE = m;
   document.querySelectorAll("button.mode").forEach(b=>b.classList.toggle("sel", b.dataset.mode===m));
-  document.getElementById("bandRow").style.display = (m==="adsb"||m==="livesdr") ? "none" : "flex";
+  document.getElementById("bandRow").style.display = (m==="adsb"||m==="livesdr"||m==="aprs") ? "none" : "flex";
   fillBands();
 }
 function fillBands(){
@@ -303,7 +304,12 @@ function refresh(){
     document.getElementById("cAir").textContent = (sdr.mode==="adsb" && sdr.adsb) ? (sdr.adsb.with_position+"/"+sdr.adsb.count) : "—";
     document.getElementById("controlNote").textContent = sdr.last||"";
     const psk=document.getElementById("pskNote");
-    if(sdr.psk) psk.textContent="📡 "+sdr.psk+(sdr.pending?(" · "+sdr.pending+" queued"):"");
+    if(sdr.mode==="aprs" && sdr.running){
+      const mc=document.getElementById("mycall"); const call=(mc&&mc.value.trim())||"";
+      psk.innerHTML="📡 "+esc(sdr.aprs||"APRS RX-only iGate running")+
+        ' — <a href="https://aprs.fi/#!call='+encodeURIComponent(call)+'" target="_blank">view on aprs.fi</a>';
+    }
+    else if(sdr.psk) psk.textContent="📡 "+sdr.psk+(sdr.pending?(" · "+sdr.pending+" queued"):"");
     else if(sdr.running && (sdr.mode==="ft8"||sdr.mode==="wspr")) psk.textContent="📡 PSKReporter armed — "+(sdr.pending||0)+" queued (uploads every ~5 min)";
     else psk.textContent="";
     const ol=document.getElementById("owrxLink");

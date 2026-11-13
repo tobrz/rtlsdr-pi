@@ -20,13 +20,14 @@ EOF
   rmmod dvb_usb_rtl28xxu 2>/dev/null || true
 fi
 
-if ! have jt9 || ! have wsprd || ! have rtl_fm || ! have sox || ! have git; then
+if ! have jt9 || ! have wsprd || ! have rtl_fm || ! have sox || ! have git || ! have direwolf; then
   if ! ip route | grep -q '^default'; then
     echo "No default route yet. Plug in ethernet, or join a Wi-Fi network from the page."
     exit 1
   fi
   apt-get update
-  DEBIAN_FRONTEND=noninteractive apt-get install -y rtl-sdr sox wsjtx git avahi-daemon
+  # direwolf: APRS 1200-baud TNC + receive-only iGate (reads rtl_fm audio on stdin).
+  DEBIAN_FRONTEND=noninteractive apt-get install -y rtl-sdr sox wsjtx git avahi-daemon direwolf
   timedatectl set-ntp true || true
 fi
 
