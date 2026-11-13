@@ -54,6 +54,22 @@ upconverter the console offers **12m, 10m, 6m, 2m** for FT8/WSPR and greys out
 the lower HF bands. Add an upconverter or a direct-sampling dongle to unlock
 40/20m etc.; the band plan already lists them.
 
+## Wi-Fi survey (Kismet, optional second adapter)
+
+With a **second, monitor-capable USB Wi-Fi adapter** plugged in (separate from the
+Pi's own Wi-Fi), the Pi can run a passive **[Kismet](https://www.kismetwireless.net/)**
+survey — channel-hopping 2.4/5 GHz and logging every access point and client it
+hears. It uses its own radio, so it runs **alongside** FT8/APRS/ADS-B, not instead
+of them. Set it up once:
+
+```sh
+sudo sh /opt/rtlsdr-pi/wifi-survey-setup.sh        # defaults to wlan1
+```
+
+Then open **http://rtlsdr.local:2501** (the console's "Wi-Fi survey" card links to
+it) and create your Kismet login on first visit. The script only ever touches the
+second adapter — the Pi's own Wi-Fi uplink is left managed and untouched.
+
 ## How it decodes (no sound card needed)
 
 On Linux there is no BlackHole/virtual-cable dance. Each cycle:

@@ -43,6 +43,17 @@ Raspberry Pi OS is left as imaged; updates only touch `/opt/rtlsdr-pi` and the u
   derived not stored. APRS feeds **not** sent to PSKReporter (that's FT8/WSPR only).
 - **Live SDR:** OpenWebRX in Docker (image `jketterl/openwebrx`, container `openwebrx`, port 8073). `sdr.Controller` mode `livesdr` runs `docker start/stop openwebrx`; exclusive with decoding (one dongle). Provisioned in bootstrap.sh (docker.io + image pull + `docker create` of a stopped container). SDR profiles are configured in OpenWebRX's own web Settings.
 - The DVB-T kernel module is blacklisted in `bootstrap.sh` so rtl-sdr can open the dongle.
+- **Wi-Fi survey (Kismet):** opt-in, on a **second Wi-Fi adapter** (this unit has a
+  TP-Link RTL8188EUS = `wlan1`, driver `rtl8xxxu`). A separate radio from the RTL-SDR,
+  so it runs **alongside** the SDR modes — it is NOT a `Controller` mode. Set up once with
+  `sudo sh /opt/rtlsdr-pi/wifi-survey-setup.sh [iface]` (default `wlan1`): installs Kismet
+  from its official apt repo, adds `sdr` to the `kismet` group, marks **only that iface**
+  unmanaged in NetworkManager (`/etc/NetworkManager/conf.d/10-unmanage-<iface>.conf`,
+  by MAC), writes `/etc/kismet/kismet_site.conf` (`source=<iface>`, `httpd_bind_address=0.0.0.0`,
+  `log_prefix=/var/lib/rtlsdr-pi/kismet/`) and a `kismet.service` run as `sdr`. UI on **:2501**
+  (create the admin login on first visit); console links to it from the "Wi-Fi survey" card.
+  **Never `airmon-ng check kill`** — the Pi's own uplink is Wi-Fi (`wlan0`); killing
+  NetworkManager locks you out. Not baked into the base image (needs the extra dongle).
 
 ## Architecture decision (one dongle)
 

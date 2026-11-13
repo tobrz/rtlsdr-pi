@@ -110,6 +110,12 @@ a{color:var(--acc)}
     <div class="err" id="controlErr"></div>
   </div>
 
+  <div class="card" id="surveyCard">
+    <h2>Wi-Fi survey — Kismet</h2>
+    <div class="note">Passive 802.11 survey on the <b>second Wi-Fi adapter (wlan1)</b> — a separate radio from the SDR, so it runs <b>alongside</b> FT8/APRS/ADS-B, not instead of them. Channel-hops 2.4/5 GHz, logging every AP and client it hears. First visit asks you to create a Kismet login.</div>
+    <a class="button" href="#" id="kismetA" target="_blank" style="text-decoration:none;display:inline-block;margin-top:8px">↗ Open Wi-Fi survey</a>
+  </div>
+
   <div class="card" id="solarCard">
     <h2>Space weather — band conditions</h2>
     <div id="solarStats" class="stats"></div>
@@ -290,6 +296,7 @@ function start(){
 function stop(){ api("/api/stop",{method:"POST",body:"{}"}).then(()=>refresh()).catch(()=>{}); }
 
 function refresh(){
+  const ka=document.getElementById("kismetA"); if(ka) ka.href="http://"+location.hostname+":2501";
   api("/api/status").then(s=>{
     STATUS = s;
     const tools = s.tools||{}, sdr = s.sdr||{}, wifi = s.wifi||{};
