@@ -26,11 +26,13 @@ def tool_status():
     """Which external programs are present. Drives what the page offers."""
     have = {name: shutil.which(name) is not None for name in (
         "rtl_fm", "rtl_sdr", "rtl_test", "sox", "jt9", "wsprd", "dump1090-fa",
-        "piaware", "docker", "direwolf",
+        "readsb", "piaware", "docker", "direwolf",
     )}
     have["ft8"] = have["rtl_fm"] and have["sox"] and have["jt9"]
     have["wspr"] = have["rtl_fm"] and have["sox"] and have["wsprd"]
-    have["adsb"] = have["dump1090-fa"]
+    # ADS-B works with either FlightAware's dump1090-fa or readsb (the maintained
+    # dump1090 successor, in Debian — used where dump1090-fa has no package).
+    have["adsb"] = have["dump1090-fa"] or have["readsb"]
     have["livesdr"] = have["docker"]  # OpenWebRX runs as a Docker container
     have["aprs"] = have["rtl_fm"] and have["direwolf"]  # rtl_fm | direwolf iGate
     return have
@@ -263,7 +265,32 @@ def extract_grid(message):
     return ""
 
 
-# ---- ADS-B (read-only; dump1090-fa runs as its own process) ----
+# ---- ADS-B (the decoder runs as its own process, writing aircraft.json) ----
+
+def adsb_command(json_dir, gain=""):
+    """argv for an ADS-B decoder that writes aircraft.json into json_dir, or None.
+
+    Prefers FlightAware's dump1090-fa; falls back to readsb (Debian's maintained
+    dump1090 successor) where dump1090-fa has no package (e.g. Debian 13). Both
+    write the same aircraft.json the console reads.
+    """
+    gain = str(gain or "").strip()
+    if shutil.which("dump1090-fa"):
+        cmd = ["dump1090-fa", "--device-index", "0", "--net",
+               "--write-json", json_dir, "--write-json-every", "1"]
+        if gain:
+            cmd += ["--gain", gain]
+        return cmd
+    if shutil.which("readsb"):
+        # --device-type must precede SDR-specific options; single dongle, so no
+        # --device (defaults to the only rtlsdr). No --net needed: we read the file.
+        cmd = ["readsb", "--device-type", "rtlsdr",
+               "--write-json", json_dir, "--write-json-every", "1"]
+        if gain:
+            cmd += ["--gain", gain]
+        return cmd
+    return None
+
 
 def adsb_aircraft(base="http://127.0.0.1:8080"):
     """Aircraft dump1090-fa currently sees, or an error dict."""

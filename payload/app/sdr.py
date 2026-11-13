@@ -502,19 +502,17 @@ class Controller:
     def _start_adsb(self):
         cfg = load_config()
         gain = str(cfg.get("adsb_gain") or "")
-        cmd = [
-            "dump1090-fa", "--device-index", "0", "--net",
-            "--write-json", ADSB_DIR, "--write-json-every", "1",
-        ]
-        if gain:
-            cmd += ["--gain", gain]
+        cmd = decoders.adsb_command(ADSB_DIR, gain)
+        if not cmd:
+            self._mode = "idle"
+            raise ValueError("No ADS-B decoder installed (dump1090-fa or readsb).")
         try:
             self._adsb = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            self._note("dump1090-fa started on 1090 MHz")
+            self._note(f"{cmd[0]} started on 1090 MHz")
         except OSError as exc:
             self._adsb = None
             self._mode = "idle"
-            raise ValueError(f"Could not start dump1090-fa: {exc}")
+            raise ValueError(f"Could not start {cmd[0]}: {exc}")
 
     def _stop_adsb(self):
         proc = self._adsb

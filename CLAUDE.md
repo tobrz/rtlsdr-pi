@@ -27,8 +27,11 @@ Raspberry Pi OS is left as imaged; updates only touch `/opt/rtlsdr-pi` and the u
 - **Band reach:** R820T reaches ≈24 MHz+; `bands.py` flags lower bands
   `needs upconverter` and the UI disables them. Default band 10m.
 - **Decoders:** FT8/WSPR = `rtl_fm | sox` → wav → `jt9 -8` / `wsprd`
-  (from the `wsjtx` apt package). ADS-B = `dump1090-fa` (FlightAware repo,
-  best-effort install), read via `adsb/aircraft.json`.
+  (from the `wsjtx` apt package). ADS-B = `dump1090-fa` **or `readsb`** (Debian's
+  maintained dump1090 successor, used where FlightAware has no package, e.g.
+  trixie) — `decoders.adsb_command()` picks whichever is installed and builds the
+  right flags; read via `adsb/aircraft.json`. The packaged service is disabled; the
+  console runs the decoder on demand (one dongle, exclusive with FT8/WSPR/APRS).
 - **APRS (`aprs` mode):** receive-only iGate on **144.390 MHz** (2 m FM, 1200-baud
   AFSK). Pipeline `rtl_fm -M fm -s 24000 | direwolf -c direwolf.conf -r 24000 -D 1 -`.
   direwolf **igates to APRS-IS itself** (`IGSERVER noam.aprs2.net` / `IGLOGIN`),
