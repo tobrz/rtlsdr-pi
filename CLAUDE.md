@@ -54,6 +54,10 @@ Raspberry Pi OS is left as imaged; updates only touch `/opt/rtlsdr-pi` and the u
   (create the admin login on first visit); console links to it from the "Wi-Fi survey" card.
   **Never `airmon-ng check kill`** — the Pi's own uplink is Wi-Fi (`wlan0`); killing
   NetworkManager locks you out. Not baked into the base image (needs the extra dongle).
+  **Log retention:** `kismet-retention.sh` + a daily `kismet-retention.timer` keep
+  **7 days / 3 GB** of `/var/lib/rtlsdr-pi/kismet/*.kismet` (age + size cap, oldest first,
+  never the open file) and restart kismet to roll a fresh dated log each day. Tune via
+  `RETAIN_DAYS`/`MAX_MB` in `kismet-retention.service`. Installed by `wifi-survey-setup.sh`.
 
 ## Architecture decision (one dongle)
 

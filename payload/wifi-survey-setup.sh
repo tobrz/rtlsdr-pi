@@ -66,4 +66,30 @@ EOF
 
 systemctl daemon-reload
 systemctl enable --now kismet.service
+
+# --- Log retention: daily prune (age + size cap) and roll, via a systemd timer.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cat > /etc/systemd/system/kismet-retention.service <<EOF
+[Unit]
+Description=Prune and roll Kismet survey logs
+
+[Service]
+Type=oneshot
+# Override RETAIN_DAYS / MAX_MB here if you want a different window/cap.
+ExecStart=${SCRIPT_DIR}/kismet-retention.sh
+EOF
+cat > /etc/systemd/system/kismet-retention.timer <<EOF
+[Unit]
+Description=Daily Kismet log retention
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+systemctl daemon-reload
+systemctl enable --now kismet-retention.timer
 echo "Kismet survey on ${IFACE} -> http://<pi>:2501 (set your admin login on first visit)"
+echo "Log retention: keeps 7 days / 3 GB in /var/lib/rtlsdr-pi/kismet (daily timer)."
